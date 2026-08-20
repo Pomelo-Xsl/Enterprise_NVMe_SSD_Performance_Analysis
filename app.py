@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import random
+import shutil
 import sqlite3
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -32,12 +35,14 @@ def init_db():
           id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, device TEXT NOT NULL,
           test_type TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL,
           runtime INTEGER NOT NULL, block_size TEXT NOT NULL, io_depth INTEGER NOT NULL,
-          jobs INTEGER NOT NULL, result TEXT)
+          jobs INTEGER NOT NULL, progress INTEGER NOT NULL DEFAULT 0, result TEXT)
         """)
+        if "progress" not in {r["name"] for r in con.execute("PRAGMA table_info(tasks)")}:
+            con.execute("ALTER TABLE tasks ADD COLUMN progress INTEGER NOT NULL DEFAULT 0")
         if not con.execute("SELECT 1 FROM tasks LIMIT 1").fetchone():
             seed = build_result("/dev/nvme0n1", "持续顺序写", 1800)
-            con.execute("""INSERT INTO tasks (name,device,test_type,status,created_at,runtime,block_size,io_depth,jobs,result)
-                VALUES (?,?,?,?,?,?,?,?,?,?)""", ("企业盘持续写入基线", "/dev/nvme0n1", "持续顺序写", "已完成", now(), 1800, "128K", 32, 1, json.dumps(seed)))
+            con.execute("""INSERT INTO tasks (name,device,test_type,status,created_at,runtime,block_size,io_depth,jobs,progress,result)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)""", ("企业盘持续写入基线", "/dev/nvme0n1", "持续顺序写", "已完成", now(), 1800, "128K", 32, 1, 100, json.dumps(seed)))
 
 
 def now(): return datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M")
@@ -77,6 +82,14 @@ def index(): return FileResponse(ROOT / "static" / "index.html")
 
 @app.get("/api/devices")
 def devices():
+    if os.getenv("NVME_USE_SYSTEM_SCAN") == "1" and shutil.which("nvme"):
+        try:
+            raw = subprocess.run(["nvme", "list", "-o", "json"], capture_output=True, text=True, timeout=8, check=True)
+            found = json.loads(raw.stdout).get("Devices", [])
+            if found:
+                return [{"path": d.get("DevicePath", "Unknown"), "model": d.get("ModelNumber", "Unknown NVMe"), "serial": d.get("SerialNumber", "—"), "firmware": d.get("Firmware", "—"), "capacity": f"{d.get('UsedBytes', 0)/1e12:.2f} TB", "namespace": d.get("DevicePath", "").split("/")[-1], "pcie": "读取设备信息", "cache": "待读取", "health": "待检查", "source": "system"} for d in found]
+        except (subprocess.SubprocessError, json.JSONDecodeError, OSError):
+            pass
     return [{"path":"/dev/nvme0n1","model":"Samsung PM9A3 3.84TB","serial":"S64DNF0R123456","firmware":"GDC5902Q","capacity":"3.84 TB","namespace":"nvme0n1","pcie":"PCIe 4.0 x4","cache":"Supported · Enabled","health":"良好"},
             {"path":"/dev/nvme1n1","model":"KIOXIA CD8-V 1.92TB","serial":"YADC0A987654","firmware":"0105","capacity":"1.92 TB","namespace":"nvme1n1","pcie":"PCIe 4.0 x4","cache":"Supported · Enabled","health":"良好"}]
 
@@ -86,20 +99,33 @@ def tasks():
     with connection() as con: return [dict(r) | {"result": json.loads(r["result"]) if r["result"] else None} for r in con.execute("SELECT * FROM tasks ORDER BY id DESC")]
 
 
+@app.get("/api/summary")
+def summary():
+    with connection() as con:
+        counts = {r["status"]: r["total"] for r in con.execute("SELECT status, COUNT(*) total FROM tasks GROUP BY status")}
+    return {"devices": len(devices()), "completed": counts.get("已完成", 0), "running": counts.get("运行中", 0), "mode": "演示模式（安全）" if os.getenv("NVME_USE_SYSTEM_SCAN") != "1" else "系统扫描模式（只读）"}
+
+
 @app.post("/api/tasks", status_code=201)
 async def create_task(data: TaskInput):
     with connection() as con:
-        cur = con.execute("""INSERT INTO tasks (name,device,test_type,status,created_at,runtime,block_size,io_depth,jobs)
-          VALUES (?,?,?,?,?,?,?,?,?)""", (data.name, data.device, data.test_type, "运行中", now(), data.runtime, data.block_size, data.io_depth, data.jobs))
+        cur = con.execute("""INSERT INTO tasks (name,device,test_type,status,created_at,runtime,block_size,io_depth,jobs,progress)
+          VALUES (?,?,?,?,?,?,?,?,?,?)""", (data.name, data.device, data.test_type, "运行中", now(), data.runtime, data.block_size, data.io_depth, data.jobs, 5))
         task_id = cur.lastrowid
     asyncio.create_task(finish_task(task_id, data))
     return {"id": task_id, "status": "运行中"}
 
 
 async def finish_task(task_id: int, data: TaskInput):
-    await asyncio.sleep(4)
+    for progress in (25, 55, 80):
+        await asyncio.sleep(1)
+        with connection() as con:
+            row = con.execute("SELECT status FROM tasks WHERE id=?", (task_id,)).fetchone()
+            if not row or row["status"] == "已停止": return
+            con.execute("UPDATE tasks SET progress=? WHERE id=?", (progress, task_id))
+    await asyncio.sleep(1)
     result = build_result(data.device, data.test_type, data.runtime)
-    with connection() as con: con.execute("UPDATE tasks SET status=?,result=? WHERE id=?", ("已完成", json.dumps(result), task_id))
+    with connection() as con: con.execute("UPDATE tasks SET status=?,progress=?,result=? WHERE id=?", ("已完成", 100, json.dumps(result), task_id))
 
 
 @app.get("/api/tasks/{task_id}")
@@ -108,6 +134,16 @@ def task(task_id: int):
     if not row: raise HTTPException(404, "任务不存在")
     d = dict(row); d["result"] = json.loads(d["result"]) if d["result"] else None
     return d
+
+
+@app.post("/api/tasks/{task_id}/stop")
+def stop_task(task_id: int):
+    with connection() as con:
+        row = con.execute("SELECT status FROM tasks WHERE id=?", (task_id,)).fetchone()
+        if not row: raise HTTPException(404, "任务不存在")
+        if row["status"] != "运行中": raise HTTPException(409, "只有运行中的任务可以停止")
+        con.execute("UPDATE tasks SET status=? WHERE id=?", ("已停止", task_id))
+    return {"id": task_id, "status": "已停止"}
 
 
 @app.get("/api/tasks/{task_id}/report")
