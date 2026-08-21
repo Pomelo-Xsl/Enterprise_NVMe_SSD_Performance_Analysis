@@ -12,6 +12,7 @@ from typing import Iterable
 class FioDirectionResult:
     operation: str
     io_bytes: int
+    total_ios: int
     bandwidth_kib_s: float
     iops: float
     runtime_ms: int
@@ -46,6 +47,7 @@ def parse_direction(operation: str, data: dict) -> FioDirectionResult:
     return FioDirectionResult(
         operation=operation,
         io_bytes=int(_number(data, "io_bytes", _number(data, "io_kbytes") * 1024)),
+        total_ios=int(_number(data, "total_ios", 0)),
         bandwidth_kib_s=float(_number(data, "bw", _number(data, "bw_bytes") / 1024)),
         iops=float(_number(data, "iops", 0)),
         runtime_ms=int(_number(data, "runtime", 0)),

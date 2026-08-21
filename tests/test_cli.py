@@ -13,7 +13,6 @@ class CLITests(unittest.TestCase):
     def test_required_business_commands_exist(self):
         command_parser = parser()
         for command in (
-            "run-bench",
             "analyze-result",
             "show-cache-stat",
             "export-report",

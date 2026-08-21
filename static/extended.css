@@ -287,6 +287,58 @@
   text-align: center;
 }
 
+.recent-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.recent-run {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, 0.7fr) auto;
+  align-items: center;
+  gap: 20px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel2);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.recent-run:hover,
+.recent-run:focus-visible {
+  border-color: #4b8a70;
+  background: #172a23;
+  outline: none;
+}
+
+.recent-run span:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.recent-run small,
+.recent-run span:nth-child(2) {
+  color: var(--muted);
+  font-family: "DM Mono", monospace;
+  font-size: 11px;
+}
+
+.recent-run i {
+  color: var(--green);
+  font-style: normal;
+}
+
+@media (max-width: 850px) {
+  .recent-run {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+}
+
 .download-group {
   display: flex;
   flex-wrap: wrap;

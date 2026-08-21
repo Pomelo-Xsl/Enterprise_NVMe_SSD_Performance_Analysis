@@ -1,22 +1,45 @@
-# Enterprise NVMe SSD Performance Analysis System
+# Enterprise NVMe SSD Cache & Performance Analysis System
 
-用于展示 NVMe SSD 设备、测试任务、缓存置换算法、性能拐点、温度关联、
-SMART 健康状态、异常告警和报告的 FastAPI Web 应用。系统包含 Web 控制台、
-YAML 场景执行器、CLI、SQLite 持久化层以及可独立复用的分析算法。
+企业级 NVMe SSD 缓存与性能分析系统用于接收 SSD Benchmark、SSD PressureTest、
+FIO 等外部工具产生的结果，完成缓存算法对比、IO 统计、异常检测、告警和报告导出。
 
-> 安全提示：当前版本是安全演示原型。创建测试任务只生成模拟数据，不会调用 `fio` 或写入任何磁盘。
+本项目定位为“结果分析平台”，不再提供磁盘 Benchmark、持续写入、随机写入或压力测试
+执行功能。它不会启动 `fio`，也不会向 NVMe 设备写入数据。
 
-## 环境要求
+## 核心能力
 
-- Python 3.9 或更高版本
-- Linux（生产环境建议 Ubuntu 20.04+）或 macOS（本地开发）
-- 可选：`nvme-cli`。仅用于只读扫描 NVMe 设备
+- 导入 FIO JSON、规范化 IO samples、Benchmark/PressureTest 性能 points；
+- 分析 P50、P95、P99、P999、P9999 延迟和读写 IO 占比；
+- 统计块大小、队列深度、带宽、IOPS 和唯一 LBA；
+- 使用 LRU-2、ARC、LIRS 对相同访问流进行缓存算法对比；
+- 识别热页、冷页、页面晋升和降级；
+- 分解热命中、冷命中、脏页驱逐和干净页驱逐；
+- 解析 `nvme-cli` SMART、控制器、Namespace 和错误日志 JSON；
+- 检测性能抖动、带宽下降和 IO 延迟毛刺；
+- 持久化分析结果与告警，支持确认告警；
+- 导出 JSON、汇总 CSV、IO 样本 CSV 和缓存算法 CSV。
 
-## 本地启动
+## 已移除的重复功能
 
-在项目根目录执行：
+以下能力应由独立的 SSD Benchmark 和 SSD PressureTest 系统负责：
+
+- Web 新建测试任务；
+- 短时突发写、持续顺序写、4K 随机写和 GC 压力测试；
+- 测试进度、停止测试和测试任务数据库；
+- CLI `run-bench`；
+- 基准测试配置档案和相关任务审计代码。
+
+缓存算法实验室仍会在内存中生成页访问序列，但不会访问块设备。这属于算法分析，
+不是 SSD 性能测试。
+
+## 环境要求与启动
+
+- Python 3.9 或更高版本；
+- Linux 或 macOS；
+- 可选：`nvme-cli`，仅用于只读设备发现。
 
 ```bash
+cd Enterprise_NVMe_SSD_Performance_Analysis
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
@@ -24,157 +47,114 @@ pip install -r requirements.txt
 uvicorn app:app --host 127.0.0.1 --port 8000
 ```
 
-浏览器访问 `http://127.0.0.1:8000`。首次启动会自动创建 `nvme_analysis.db`，并生成一条示例测试记录。
+浏览器访问 `http://127.0.0.1:8000`，接口文档位于
+`http://127.0.0.1:8000/docs`。
 
-停止服务时，在启动终端按 `Ctrl+C`。
+首次启动会创建 `nvme_analysis.db`。已有数据库中的旧 `tasks` 表不会被读取或修改，
+以便升级时保留历史数据；新版本只使用分析记录和告警表。
 
-## 可选：只读扫描服务器 NVMe 设备
+## 导入已有测试结果
 
-默认页面使用安全的模拟设备。Linux 上安装 `nvme-cli` 后，可显式启用只读扫描：
+进入 Web 的“结果分析”页面，点击“导入 JSON”。系统根据数据结构自动判断格式。
 
-```bash
-sudo apt update && sudo apt install -y nvme-cli
-NVME_USE_SYSTEM_SCAN=1 uvicorn app:app --host 127.0.0.1 --port 8000
-```
+### 规范化 IO 样本
 
-该开关只运行 `nvme list -o json`；它不会启动压测，也不会修改设备数据。
+该格式可以执行最完整的 IO、冷热页和缓存算法分析：
 
-## Linux 生产部署（systemd + Nginx）
-
-以下示例假定项目位于 `/opt/nvme-insight`，并以专用的低权限账户运行。
-
-```bash
-sudo useradd --system --create-home --shell /usr/sbin/nologin nvmeinsight
-sudo mkdir -p /opt/nvme-insight
-sudo chown -R nvmeinsight:nvmeinsight /opt/nvme-insight
-```
-
-将项目文件复制到 `/opt/nvme-insight` 后，以 `nvmeinsight` 用户创建虚拟环境并安装依赖：
-
-```bash
-sudo -u nvmeinsight python3 -m venv /opt/nvme-insight/.venv
-sudo -u nvmeinsight /opt/nvme-insight/.venv/bin/pip install -r /opt/nvme-insight/requirements.txt
-```
-
-创建 `/etc/systemd/system/nvme-insight.service`：
-
-```ini
-[Unit]
-Description=NVMe Insight Web Service
-After=network.target
-
-[Service]
-User=nvmeinsight
-Group=nvmeinsight
-WorkingDirectory=/opt/nvme-insight
-Environment=PYTHONUNBUFFERED=1
-# 如需只读设备扫描，取消下一行注释：
-# Environment=NVME_USE_SYSTEM_SCAN=1
-ExecStart=/opt/nvme-insight/.venv/bin/uvicorn app:app --host 127.0.0.1 --port 8000 --workers 2
-Restart=on-failure
-RestartSec=5
-NoNewPrivileges=true
-PrivateTmp=true
-
-[Install]
-WantedBy=multi-user.target
-```
-
-启动并设置开机自启：
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now nvme-insight
-sudo systemctl status nvme-insight
-```
-
-查看日志：
-
-```bash
-sudo journalctl -u nvme-insight -f
-```
-
-### Nginx 反向代理
-
-安装 Nginx：
-
-```bash
-sudo apt install -y nginx
-```
-
-创建 `/etc/nginx/sites-available/nvme-insight`：
-
-```nginx
-server {
-    listen 80;
-    server_name nvme-insight.example.com;
-
-    client_max_body_size 10m;
-
-    location / {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+```json
+{
+  "samples": [
+    {
+      "timestamp_ms": 0,
+      "lba": 1024,
+      "size_bytes": 4096,
+      "operation": "read",
+      "latency_us": 85.2,
+      "queue_depth": 16
     }
+  ],
+  "smart": {
+    "temperature": 48,
+    "percentage_used": 3,
+    "media_errors": 0
+  }
 }
 ```
 
-启用并检查配置：
+### Benchmark 或 PressureTest 性能点
 
-```bash
-sudo ln -s /etc/nginx/sites-available/nvme-insight /etc/nginx/sites-enabled/nvme-insight
-sudo nginx -t
-sudo systemctl reload nginx
+```json
+{
+  "points": [
+    {
+      "minute": 0,
+      "bandwidth": 6800,
+      "iops": 520000,
+      "latency": 120,
+      "temperature": 42
+    }
+  ],
+  "smart": {
+    "temperature": 42,
+    "percentage_used": 3
+  }
+}
 ```
 
-生产环境应使用受信任的 TLS 证书（例如 Certbot）并限制管理页面的访问来源。
+也兼容旧系统的嵌套形式：
 
-## 升级
-
-```bash
-cd /opt/nvme-insight
-sudo -u nvmeinsight /opt/nvme-insight/.venv/bin/pip install -r requirements.txt
-sudo systemctl restart nvme-insight
+```json
+{
+  "name": "existing-benchmark",
+  "result": {
+    "points": []
+  }
+}
 ```
 
-升级前备份 `nvme_analysis.db`。不要将它或任何包含真实设备序列号的运行数据提交到公共仓库。
+### FIO JSON
 
-## 接入真实压测前
+直接导入以下命令产生的文件：
 
-请先实现设备白名单、管理员授权、双重确认、审计日志和 `fio` 子进程隔离。禁止让 Web 请求直接对任意 `/dev/nvme*` 设备执行写入操作。
+```bash
+fio workload.fio --output-format=json --output=fio-result.json
+```
 
-## 功能架构
+FIO 汇总格式不包含逐 IO LBA 时，系统只显示带宽、IOPS、读写量和延迟汇总，
+不会虚构冷热页或缓存命中数据。
 
-当前版本提供以下业务能力：
+## CLI
 
-- LRU-2、ARC、LIRS 缓存置换算法与相同负载下的横向仿真；
-- 基于滑动时间窗口、读写权重和迟滞阈值的冷热页识别；
-- 热命中、冷命中、未命中、脏页驱逐、干净页驱逐分解；
-- P50、P95、P99、P999、P9999 延迟，块大小、读写占比、队列深度统计；
-- 按时间窗聚合带宽和 IOPS，识别延迟毛刺、性能抖动和缓存异常；
-- 解析 `fio --output-format=json`、fio 时序日志和 `nvme-cli` JSON；
-- SQLite 保存场景结果与告警，支持告警过滤和确认；
-- JSON、汇总 CSV、IO 样本 CSV、缓存算法 CSV 报告导出；
-- 安全模拟任务、设备详情展开、返回导航、算法实验室、告警和报告页面。
+```bash
+# 分析已有结果
+python cli.py analyze-result benchmark-result.json
 
-所有内置工作负载都只在内存中生成样本。除非显式设置
-`NVME_USE_SYSTEM_SCAN=1`，系统也不会调用本机的 `nvme-cli`。
+# 对给定页访问序列比较缓存算法
+python cli.py show-cache-stat --pages 1,2,1,3,1,4,2,1 --capacity 3
 
-## YAML 场景配置
+# 校验并运行内存缓存分析场景
+python cli.py validate-config --config config/default.yaml
+python cli.py run-scenario \
+  --config config/default.yaml \
+  --database nvme_analysis.db \
+  --output scenario-result.json
 
-默认配置位于 `config/default.yaml`，包含场景、工作负载、缓存、告警和日志配置。
-可以复制此文件建立不同测试场景：
+# 按用途导出分析报告
+python cli.py export-full-report scenario-result.json --section json --output report.json
+python cli.py export-full-report scenario-result.json --section summary --output summary.csv
+python cli.py export-full-report scenario-result.json --section samples --output io-samples.csv
+python cli.py export-full-report scenario-result.json --section cache --output cache.csv
+```
+
+## YAML 算法分析配置
+
+默认配置位于 `config/default.yaml`。配置控制内存访问流、缓存容量、冷热阈值、
+告警规则和日志轮转，不会生成真实设备 IO。
 
 ```yaml
 scenario:
-  name: mixed-cache-baseline
-  profile: mixed-io
-  runtime: 600
-  cache_pages: 256
+  name: mixed-cache-analysis
   safe_simulation: true
-  tags: [baseline, nightly]
 
 workload:
   kind: mixed
@@ -182,7 +162,6 @@ workload:
   page_count: 8192
   read_ratio: 0.7
   block_size: 4096
-  seed: 7
 
 cache:
   algorithm: compare
@@ -190,97 +169,76 @@ cache:
   hot_window_ms: 10000
   hot_threshold: 4.0
   cold_threshold: 2.0
-  read_weight: 1.0
-  write_weight: 1.5
-
-alerts:
-  temperature_warning: 65
-  temperature_critical: 75
-  latency_spike_zscore: 2.5
-  bandwidth_drop_percent: 25
-
-logging:
-  directory: logs
-  level: INFO
-  max_bytes: 2000000
-  backup_count: 5
 ```
 
-系统拒绝 `safe_simulation: false`，并对时长、容量、块大小、阈值、日志轮转等参数
-进行边界校验，避免配置错误直接进入执行链路。
-
-## CLI 使用方法
-
-先校验配置，再运行并保存完整报告：
-
-```bash
-python cli.py validate-config --config config/default.yaml
-python cli.py run-scenario \
-  --config config/default.yaml \
-  --database nvme_analysis.db \
-  --output scenario-result.json
-```
-
-兼容软件说明书约定的四个核心子命令：
-
-```bash
-# 生成安全模拟基准结果
-python cli.py run-bench --runtime 600 --output result.json
-
-# 自动识别普通性能点、规范化 IO 样本或 fio JSON
-python cli.py analyze-result result.json
-
-# 使用页访问序列对比 LRU-2、ARC、LIRS
-python cli.py show-cache-stat --pages 1,2,1,3,1,4,2,1 --capacity 3
-
-# 导出任务结果
-python cli.py export-report result.json --format csv --output samples.csv
-```
-
-完整场景报告可按用途拆分：
-
-```bash
-python cli.py export-full-report scenario-result.json --section json --output report.json
-python cli.py export-full-report scenario-result.json --section summary --output summary.csv
-python cli.py export-full-report scenario-result.json --section samples --output io-samples.csv
-python cli.py export-full-report scenario-result.json --section cache --output cache.csv
-```
+系统拒绝 `safe_simulation: false`，防止该分析服务被误用为磁盘测试执行器。
 
 ## Web API
 
-主要接口如下：
+| 接口                                            | 说明                         |
+| ----------------------------------------------- | ---------------------------- |
+| `GET /api/summary`                              | 获取分析平台概览             |
+| `GET /api/devices`                              | 获取演示设备或只读扫描结果   |
+| `POST /api/analysis/import`                     | 导入并持久化外部 JSON 结果   |
+| `GET /api/simulations/cache`                    | 运行内存缓存算法对比         |
+| `POST /api/scenarios/run`                       | 运行 YAML 等价的内存分析场景 |
+| `GET /api/scenarios/runs`                       | 查询分析记录                 |
+| `GET /api/scenarios/runs/{id}`                  | 获取完整分析结果             |
+| `GET /api/scenarios/runs/{id}/export/{section}` | 导出报告                     |
+| `GET /api/alerts`                               | 查询持久化告警               |
+| `POST /api/alerts/{id}/acknowledge`             | 确认告警                     |
 
-| 接口 | 说明 |
-| --- | --- |
-| `GET /api/devices` | 获取模拟设备或只读扫描结果 |
-| `GET /api/tasks` | 获取交互式安全模拟任务 |
-| `POST /api/tasks` | 新建安全模拟任务 |
-| `GET /api/simulations/cache` | 运行缓存算法对比 |
-| `POST /api/scenarios/run` | 使用 JSON 形式的 YAML 等价配置运行场景 |
-| `GET /api/scenarios/runs` | 查询持久化场景 |
-| `GET /api/scenarios/runs/{id}` | 获取完整场景报告 |
-| `GET /api/scenarios/runs/{id}/export/{section}` | 导出 JSON/summary/samples/cache |
-| `GET /api/alerts` | 按运行、等级和确认状态查询告警 |
-| `POST /api/alerts/{id}/acknowledge` | 确认告警 |
+`/api/tasks`、`/api/tasks/{id}/stop` 等压测任务接口已经移除。
 
-FastAPI 自动接口文档位于 `http://127.0.0.1:8000/docs`。
+## 只读设备扫描
+
+Linux 安装 `nvme-cli` 后，可以显式开启：
+
+```bash
+NVME_USE_SYSTEM_SCAN=1 uvicorn app:app --host 127.0.0.1 --port 8000
+```
+
+系统只运行 `nvme list -o json`，不会运行测试或修改设备。
 
 ## 测试
-
-运行全量单元与集成测试：
 
 ```bash
 python -m unittest discover -s tests -v
 ```
 
-测试覆盖顺序、随机、混合和冷热交替工作负载，三种缓存算法、冷热识别、
-IO 统计、FIO/NVMe 解析、配置校验、报告导出、告警、SQLite 持久化和完整场景链路。
+测试覆盖缓存算法、冷热识别、IO 统计、FIO/NVMe 解析、外部结果导入、配置校验、
+异常检测、告警、持久化和报告导出。测试代码用于验证分析系统正确性，
+不执行 SSD Benchmark 或 PressureTest。
+
+## Linux 部署
+
+```ini
+[Unit]
+Description=NVMe Insight Analysis Service
+After=network.target
+
+[Service]
+User=nvmeinsight
+Group=nvmeinsight
+WorkingDirectory=/opt/nvme-insight
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/nvme-insight/.venv/bin/uvicorn app:app --host 127.0.0.1 --port 8000 --workers 2
+Restart=on-failure
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Nginx 将请求反向代理到 `http://127.0.0.1:8000` 即可。生产环境应配置 TLS、
+访问控制和上传文件大小限制。
 
 ## 运行数据
 
-- `nvme_analysis.db`：任务、场景结果和告警；
-- `logs/nvme-insight.log`：分级运行日志并按大小轮转；
-- `logs/nvme-alerts.log`：告警持久化日志；
-- CLI `--output` 指定的 JSON/CSV：可直接交给绘图或数据分析工具。
+- `nvme_analysis.db`：分析结果和告警；
+- `logs/nvme-insight.log`：分析运行日志；
+- `logs/nvme-alerts.log`：告警日志；
+- 导出的 JSON/CSV：供 Excel、Python、Grafana 等工具继续处理。
 
-数据库与日志是运行时文件，不应提交到公共代码仓库。生产升级前应先备份数据库。
+数据库、日志、真实设备序列号和外部测试结果不应提交到公共仓库。

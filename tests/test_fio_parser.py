@@ -14,6 +14,7 @@ class FioParserTests(unittest.TestCase):
             "read",
             {
                 "io_bytes": 4096,
+                "total_ios": 7,
                 "bw": 1024,
                 "iops": 250,
                 "runtime": 1000,
@@ -24,6 +25,7 @@ class FioParserTests(unittest.TestCase):
             },
         )
         self.assertEqual(result.latency_mean_us, 12)
+        self.assertEqual(result.total_ios, 7)
         self.assertEqual(result.latency_percentiles_us["99.000000"], 30)
 
     def test_parse_complete_json(self):

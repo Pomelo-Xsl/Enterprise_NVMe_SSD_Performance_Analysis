@@ -26,16 +26,6 @@ def read_json(path: str) -> dict:
         return json.load(handle)
 
 
-def run_bench(args):
-    from app import build_result
-
-    result = build_result(args.device, args.test_type, args.runtime)
-    Path(args.output).write_text(
-        json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-    print(f"安全模拟完成：{args.output}；未对设备执行写入。")
-
-
 def analyze_result(args):
     data = read_json(args.input)
     if "jobs" in data:
@@ -152,12 +142,6 @@ def parser():
         prog="nvme-insight", description="安全 NVMe 缓存与性能分析工具"
     )
     commands = root.add_subparsers(dest="command", required=True)
-    run = commands.add_parser("run-bench", help="运行安全模拟基准测试")
-    run.add_argument("--device", default="/dev/nvme0n1")
-    run.add_argument("--test-type", default="持续顺序写")
-    run.add_argument("--runtime", type=int, default=1800)
-    run.add_argument("--output", default="result.json")
-    run.set_defaults(func=run_bench)
     analyze = commands.add_parser("analyze-result", help="分析已有 JSON 样本")
     analyze.add_argument("input")
     analyze.set_defaults(func=analyze_result)
@@ -170,7 +154,9 @@ def parser():
     export.add_argument("--format", choices=["csv", "json"], default="json")
     export.add_argument("--output", required=True)
     export.set_defaults(func=export_report)
-    simulate = commands.add_parser("simulate-cache", help="运行完整缓存与 IO 仿真")
+    simulate = commands.add_parser(
+        "simulate-cache", help="运行内存页访问与缓存算法仿真"
+    )
     simulate.add_argument(
         "--workload",
         choices=["sequential", "random", "mixed", "hot-cold"],
@@ -183,7 +169,7 @@ def parser():
     simulate.set_defaults(func=simulate_cache)
     scenario = commands.add_parser(
         "run-scenario",
-        help="从 YAML 运行安全场景并持久化结果",
+        help="从 YAML 运行内存分析场景并持久化结果",
     )
     scenario.add_argument("--config", default="config/default.yaml")
     scenario.add_argument("--database", default="nvme_analysis.db")
