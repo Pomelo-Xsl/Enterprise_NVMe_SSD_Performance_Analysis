@@ -1,0 +1,38 @@
+scenario:
+  name: enterprise-mixed-cache-comparison
+  profile: sustained-write
+  runtime: 1800
+  cache_pages: 1024
+  safe_simulation: true
+  tags:
+    - enterprise
+    - cache-comparison
+
+workload:
+  kind: mixed
+  count: 1000
+  page_count: 4096
+  read_ratio: 0.7
+  block_size: 4096
+  seed: 7
+
+cache:
+  algorithm: compare
+  capacity_pages: 256
+  hot_window_ms: 10000
+  hot_threshold: 4.0
+  cold_threshold: 2.0
+  read_weight: 1.0
+  write_weight: 1.5
+
+alerts:
+  temperature_warning: 65
+  temperature_critical: 75
+  latency_spike_zscore: 2.5
+  bandwidth_drop_percent: 25
+
+logging:
+  directory: logs
+  level: INFO
+  max_bytes: 2000000
+  backup_count: 5

@@ -1,6 +1,19 @@
 import unittest
 
-from analysis import analyse, describe, detect_knee, latency_qos, percentile, recovery_rate, stability_grade, temperature_correlation
+from analysis import (
+    analyse,
+    describe,
+    detect_knee,
+    ewma,
+    latency_qos,
+    linear_trend,
+    moving_average,
+    percentile,
+    recovery_rate,
+    stability_grade,
+    temperature_correlation,
+    zscore_anomalies,
+)
 
 
 def samples():
@@ -36,10 +49,16 @@ class StatisticsTests(unittest.TestCase):
         self.assertGreater(qos["p99"], qos["p50"])
         self.assertGreater(qos["p9999"], 0)
 
+    def test_smoothing_algorithms(self):
+        self.assertEqual(moving_average([1, 3, 5], 2), [1, 2, 4])
+        self.assertEqual(ewma([10, 10, 10]), [10.0, 10.0, 10.0])
+
 
 class BehaviourTests(unittest.TestCase):
     def test_detect_sustained_knee(self):
-        knee = detect_knee([item["bandwidth"] for item in samples()], window=3, threshold_percent=20)
+        knee = detect_knee(
+            [item["bandwidth"] for item in samples()], window=3, threshold_percent=20
+        )
         self.assertIsNotNone(knee)
         self.assertEqual(knee.index, 3)
         self.assertGreater(knee.drop_percent, 20)
@@ -54,12 +73,17 @@ class BehaviourTests(unittest.TestCase):
     def test_temperature_correlation(self):
         self.assertLess(temperature_correlation(samples()), 0)
 
+    def test_trend_and_anomalies(self):
+        self.assertEqual(linear_trend([10, 20, 30])["direction"], "rising")
+        self.assertEqual(len(zscore_anomalies([10, 10, 10])), 0)
+
     def test_full_analysis_contract(self):
         result = analyse(samples())
         self.assertIn("bandwidth", result)
         self.assertIn("latency", result)
         self.assertIn("stability", result)
         self.assertIsNotNone(result["knee"])
+        self.assertIn("smoothed_bandwidth", result)
 
 
 if __name__ == "__main__":

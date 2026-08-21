@@ -1,1 +1,194 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>NVMe Insight</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=DM+Mono&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet"><link rel="stylesheet" href="/static/style.css"><script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script></head><body><aside><div class="brand"><span class="mark">N</span><div>NVMe <b>Insight</b><small>PERFORMANCE LAB</small></div></div><nav><button class="active" data-view="overview">▦　概览</button><button data-view="devices">◉　设备管理</button><button data-view="tasks">◷　测试任务</button><button data-view="analysis">⌁　性能分析</button></nav><div class="side-footer"><i></i> 系统监控正常<br><span>v1.0.0 · Enterprise</span></div></aside><main><header><div><p class="eyebrow">ENTERPRISE STORAGE OBSERVABILITY</p><h1 id="page-title">性能概览</h1></div><div class="header-actions"><span class="live"><i></i> 数据采集在线</span><button class="primary" id="new-task">＋ 新建测试</button></div></header><section id="overview" class="view active"><div class="hero"><div><p>当前受管设备</p><h2>2 <span>NVMe SSD</span></h2><small>最近扫描：刚刚</small></div><div class="hero-device"><b>Samsung PM9A3 3.84TB</b><span>/dev/nvme0n1　·　PCIe 4.0 x4　·　缓存已启用</span></div></div><div class="metrics" id="metrics"></div><div class="panel chart-panel"><div class="panel-head"><div><h3>持续写入性能</h3><p>带宽与温度关联 · 最近一次测试</p></div><span class="tag">128K · QD32</span></div><div id="performance-chart"></div></div><div class="grid"><div class="panel"><div class="panel-head"><h3>自动分析</h3><span class="tag teal">已完成</span></div><div class="insight" id="insight"></div></div><div class="panel"><div class="panel-head"><h3>设备健康</h3><span class="tag">SMART</span></div><div class="health" id="health"></div></div></div></section><section id="devices" class="view"><div class="section-head"><div><h2>NVMe 设备</h2><p>识别并管理服务器内的测试设备</p></div><button class="secondary" id="rescan">↻ 重新扫描</button></div><div class="device-list" id="device-list"></div></section><section id="tasks" class="view"><div class="section-head"><div><h2>测试任务</h2><p>管理性能测试与历史记录</p></div><button class="primary" id="new-task-2">＋ 新建测试</button></div><div class="panel"><table><thead><tr><th>任务</th><th>设备</th><th>测试类型</th><th>配置</th><th>创建时间</th><th>状态</th><th></th></tr></thead><tbody id="task-list"></tbody></table></div></section><section id="analysis" class="view"><div class="section-head"><div><h2>结果分析</h2><p id="analysis-subtitle">选择一项已完成的测试</p></div><select id="analysis-select"></select></div><div id="analysis-content"></div></section></main><dialog id="task-modal"><form id="task-form"><div class="modal-title"><div><p class="eyebrow">CREATE TEST JOB</p><h2>新建性能测试</h2></div><button type="button" class="close">×</button></div><p class="warning">⚠ 所有真实 I/O 操作会覆盖目标磁盘数据。此演示版本仅生成安全的模拟测试结果。</p><label>任务名称<input required name="name" value="连续写缓存分析"></label><div class="form-grid"><label>目标设备<select name="device"><option>/dev/nvme0n1 · Samsung PM9A3</option><option>/dev/nvme1n1 · KIOXIA CD8-V</option></select></label><label>测试类型<select name="test_type"><option>持续顺序写</option><option>短时突发写</option><option>4K 随机写</option><option>GC 压力测试</option></select></label><label>运行时长 (秒)<input name="runtime" type="number" min="60" max="7200" value="1800"></label><label>块大小<select name="block_size"><option>128K</option><option>1M</option><option>4K</option></select></label><label>队列深度<input name="io_depth" type="number" min="1" max="256" value="32"></label><label>并发任务<input name="jobs" type="number" min="1" max="32" value="1"></label></div><div class="modal-actions"><button type="button" class="secondary close">取消</button><button class="primary">启动模拟测试</button></div></form></dialog><script src="/static/app.js"></script></body></html>
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <title>NVMe Insight</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Mono&family=Noto+Sans+SC:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  </head>
+  <body>
+    <aside>
+      <div class="brand">
+        <span class="mark">N</span>
+        <div>NVMe <b>Insight</b><small>PERFORMANCE LAB</small></div>
+      </div>
+      <nav>
+        <button class="active" data-view="overview">▦　概览</button
+        ><button data-view="devices">◉　设备管理</button
+        ><button data-view="tasks">◷　测试任务</button
+        ><button data-view="analysis">⌁　性能分析</button>
+      </nav>
+      <div class="side-footer">
+        <i></i> 系统监控正常<br /><span>v1.0.0 · Enterprise</span>
+      </div>
+    </aside>
+    <main>
+      <header>
+        <div>
+          <p class="eyebrow">ENTERPRISE STORAGE OBSERVABILITY</p>
+          <h1 id="page-title">性能概览</h1>
+        </div>
+        <div class="header-actions">
+          <span class="live"><i></i> 数据采集在线</span
+          ><button class="primary" id="new-task">＋ 新建测试</button>
+        </div>
+      </header>
+      <section id="overview" class="view active">
+        <div class="hero">
+          <div>
+            <p>当前受管设备</p>
+            <h2>2 <span>NVMe SSD</span></h2>
+            <small>最近扫描：刚刚</small>
+          </div>
+          <div class="hero-device">
+            <b>Samsung PM9A3 3.84TB</b
+            ><span>/dev/nvme0n1　·　PCIe 4.0 x4　·　缓存已启用</span>
+          </div>
+        </div>
+        <div class="metrics" id="metrics"></div>
+        <div class="panel chart-panel">
+          <div class="panel-head">
+            <div>
+              <h3>持续写入性能</h3>
+              <p>带宽与温度关联 · 最近一次测试</p>
+            </div>
+            <span class="tag">128K · QD32</span>
+          </div>
+          <div id="performance-chart"></div>
+        </div>
+        <div class="grid">
+          <div class="panel">
+            <div class="panel-head">
+              <h3>自动分析</h3>
+              <span class="tag teal">已完成</span>
+            </div>
+            <div class="insight" id="insight"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-head">
+              <h3>设备健康</h3>
+              <span class="tag">SMART</span>
+            </div>
+            <div class="health" id="health"></div>
+          </div>
+        </div>
+      </section>
+      <section id="devices" class="view">
+        <div class="section-head">
+          <div>
+            <h2>NVMe 设备</h2>
+            <p>识别并管理服务器内的测试设备</p>
+          </div>
+          <button class="secondary" id="rescan">↻ 重新扫描</button>
+        </div>
+        <div class="device-list" id="device-list"></div>
+      </section>
+      <section id="tasks" class="view">
+        <div class="section-head">
+          <div>
+            <h2>测试任务</h2>
+            <p>管理性能测试与历史记录</p>
+          </div>
+          <button class="primary" id="new-task-2">＋ 新建测试</button>
+        </div>
+        <div class="panel">
+          <table>
+            <thead>
+              <tr>
+                <th>任务</th>
+                <th>设备</th>
+                <th>测试类型</th>
+                <th>配置</th>
+                <th>创建时间</th>
+                <th>状态</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="task-list"></tbody>
+          </table>
+        </div>
+      </section>
+      <section id="analysis" class="view">
+        <div class="section-head">
+          <div>
+            <h2>结果分析</h2>
+            <p id="analysis-subtitle">选择一项已完成的测试</p>
+          </div>
+          <select id="analysis-select"></select>
+        </div>
+        <div id="analysis-content"></div>
+      </section>
+    </main>
+    <dialog id="task-modal">
+      <form id="task-form">
+        <div class="modal-title">
+          <div>
+            <p class="eyebrow">CREATE TEST JOB</p>
+            <h2>新建性能测试</h2>
+          </div>
+          <button type="button" class="close">×</button>
+        </div>
+        <p class="warning">
+          ⚠ 所有真实 I/O
+          操作会覆盖目标磁盘数据。此演示版本仅生成安全的模拟测试结果。
+        </p>
+        <label
+          >任务名称<input required name="name" value="连续写缓存分析"
+        /></label>
+        <div class="form-grid">
+          <label
+            >目标设备<select name="device">
+              <option>/dev/nvme0n1 · Samsung PM9A3</option>
+              <option>/dev/nvme1n1 · KIOXIA CD8-V</option>
+            </select></label
+          ><label
+            >测试类型<select name="test_type">
+              <option>持续顺序写</option>
+              <option>短时突发写</option>
+              <option>4K 随机写</option>
+              <option>GC 压力测试</option>
+            </select></label
+          ><label
+            >运行时长 (秒)<input
+              name="runtime"
+              type="number"
+              min="60"
+              max="7200"
+              value="1800" /></label
+          ><label
+            >块大小<select name="block_size">
+              <option>128K</option>
+              <option>1M</option>
+              <option>4K</option>
+            </select></label
+          ><label
+            >队列深度<input
+              name="io_depth"
+              type="number"
+              min="1"
+              max="256"
+              value="32" /></label
+          ><label
+            >并发任务<input
+              name="jobs"
+              type="number"
+              min="1"
+              max="32"
+              value="1"
+          /></label>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="secondary close">取消</button
+          ><button class="primary">启动模拟测试</button>
+        </div>
+      </form>
+    </dialog>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

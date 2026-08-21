@@ -1,6 +1,12 @@
 import unittest
 
-from profiles import apply_profile, get_profile, list_profiles, safe_fio_preview, validate_parameters
+from profiles import (
+    apply_profile,
+    get_profile,
+    list_profiles,
+    safe_fio_preview,
+    validate_parameters,
+)
 
 
 class ProfileTests(unittest.TestCase):
@@ -22,7 +28,16 @@ class ProfileTests(unittest.TestCase):
 
     def test_invalid_numeric_values_are_rejected(self):
         with self.assertRaises(ValueError):
-            validate_parameters({"block_size": "4K", "rw": "write", "io_depth": 0, "jobs": 1, "runtime": 30, "ramp_time": 0})
+            validate_parameters(
+                {
+                    "block_size": "4K",
+                    "rw": "write",
+                    "io_depth": 0,
+                    "jobs": 1,
+                    "runtime": 30,
+                    "ramp_time": 0,
+                }
+            )
 
 
 if __name__ == "__main__":

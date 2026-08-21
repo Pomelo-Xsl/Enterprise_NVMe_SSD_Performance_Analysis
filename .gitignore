@@ -1,0 +1,25 @@
+# Python bytecode and isolated environments
+__pycache__/
+*.py[cod]
+.venv/
+
+# Runtime state produced by the Web, CLI and scenario service
+*.db
+*.db-shm
+*.db-wal
+logs/
+
+# Generated reports and local benchmark captures
+result.json
+scenario-result.json
+reports/
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
+
+# Test and coverage output
+.coverage
+htmlcov/
+.pytest_cache/
