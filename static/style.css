@@ -49,10 +49,32 @@ aside {
   place-items: center;
   width: 34px;
   height: 34px;
-  background: var(--green);
+  flex: 0 0 34px;
+  background: linear-gradient(145deg, #76ebbc, #4bcf9a);
   color: #092018;
-  font: bold 20px "DM Mono";
   border-radius: 8px;
+  box-shadow: 0 7px 20px rgba(54, 211, 151, 0.16);
+}
+.mark svg {
+  width: 27px;
+  height: 27px;
+  overflow: visible;
+}
+.mark .chip-body {
+  fill: rgba(9, 32, 24, 0.08);
+  stroke: currentColor;
+  stroke-width: 2.5;
+}
+.mark .chip-pins,
+.mark .chip-wave {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.5;
+}
+.mark circle {
+  fill: currentColor;
 }
 nav {
   margin-top: 48px;
