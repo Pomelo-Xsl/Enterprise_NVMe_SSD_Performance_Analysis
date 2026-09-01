@@ -39,7 +39,8 @@ aside {
 }
 .brand small {
   display: block;
-  font: 9px "DM Mono";
+  font: 500 9px "Noto Sans SC", sans-serif;
+  letter-spacing: 0.6px;
   color: var(--muted);
   margin-top: 3px;
 }

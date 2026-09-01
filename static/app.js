@@ -179,7 +179,7 @@ function showView(view, options = {}) {
   $$("nav button").forEach((button) => {
     button.classList.toggle("active", button.dataset.view === view);
   });
-  $("#page-title").textContent = TITLES[view] || "NVMe Insight";
+  $("#page-title").textContent = TITLES[view] || "企业级 NVMe SSD 分析系统";
 
   const back = ensureBackButton();
   back.classList.toggle("hidden", view === "overview");
@@ -241,7 +241,7 @@ async function loadOverview() {
             `,
           )
           .join("")
-      : `<div class="empty-state">尚未导入结果。支持 Benchmark、PressureTest、FIO JSON。</div>`;
+      : `<div class="empty-state">尚未导入结果。可以加载演示案例，或导入 Benchmark、PressureTest、FIO JSON。</div>`;
   } catch (error) {
     notify(error.message);
   }
@@ -417,9 +417,26 @@ function renderAnalysis() {
   }
 
   const id = report.run_id;
+  const caseMetadata = report.metadata || {};
+  const casePanel = caseMetadata.title
+    ? `
+      <div class="panel demo-case-panel">
+        <div>
+          <p class="eyebrow">DEMO CASE · ${caseMetadata.industry || "NVME"}</p>
+          <h3>${caseMetadata.title}</h3>
+          <p>${caseMetadata.description || ""}</p>
+        </div>
+        <div class="case-observations">
+          ${(caseMetadata.expected_observations || [])
+            .map((item) => `<span>✓ ${item}</span>`)
+            .join("")}
+        </div>
+      </div>`
+    : "";
   $("#analysis-subtitle").textContent =
     `${report.configuration?.scenario?.name || "分析记录"} · ${report.source_format || report.mode}`;
   $("#analysis-content").innerHTML = `
+    ${casePanel}
     <div class="summary-grid">${analysisMetrics(report).join("")}</div>
     <div class="panel">
       <div class="panel-head">
@@ -456,6 +473,24 @@ async function importResult(file) {
     notify(`导入失败：${error.message}`, 6000);
   } finally {
     $("#result-file").value = "";
+  }
+}
+
+async function loadDemoCase() {
+  const button = $("#load-demo");
+  button.disabled = true;
+  button.textContent = "正在生成案例…";
+  try {
+    const report = await api("/api/demo/load", { method: "POST" });
+    notify("演示案例分析完成");
+    await Promise.all([loadOverview(), loadRuns(report.run_id)]);
+    state.history = [];
+    showView("analysis");
+  } catch (error) {
+    notify(`案例加载失败：${error.message}`, 6000);
+  } finally {
+    button.disabled = false;
+    button.textContent = "▶ 演示案例";
   }
 }
 
@@ -637,6 +672,7 @@ function bindEvents() {
     const [file] = event.target.files;
     if (file) importResult(file);
   });
+  $("#load-demo").addEventListener("click", loadDemoCase);
   $("#analysis-select").addEventListener("change", (event) =>
     loadRuns(Number(event.target.value)),
   );

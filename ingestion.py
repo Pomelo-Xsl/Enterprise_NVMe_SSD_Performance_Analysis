@@ -82,6 +82,7 @@ def _ingest_samples(payload: dict, name: str, cache_pages: int) -> dict:
     report = _base_report(name, "normalized-io", len(samples))
     report.update(
         {
+            "metadata": payload.get("metadata", {}),
             "samples": [sample.to_dict() for sample in samples],
             "points": points,
             "io_statistics": analyze_io(samples),
@@ -112,6 +113,7 @@ def _ingest_points(payload: dict, name: str) -> dict:
     report = _base_report(name, "performance-points", len(points))
     report.update(
         {
+            "metadata": payload.get("metadata", {}),
             "points": points,
             "performance": performance,
             "anomalies": detect_anomalies(points),
@@ -144,6 +146,7 @@ def _ingest_fio(payload: dict, name: str) -> dict:
     report = _base_report(name, "fio-json", total_operations)
     report.update(
         {
+            "metadata": payload.get("metadata", {}),
             "fio": fio_result,
             "io_statistics": fio_result["aggregate"],
             "performance": {},

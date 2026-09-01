@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from config import parse_application_config
+from demo_case import DEMO_NAME, build_demo_payload
 from exporters import (
     cache_comparison_csv,
     io_samples_csv,
@@ -31,7 +32,11 @@ ROOT = Path(__file__).parent
 DATABASE_PATH = Path(os.getenv("NVME_ANALYSIS_DB", str(ROOT / "nvme_analysis.db")))
 REPOSITORY = Repository(DATABASE_PATH)
 
-app = FastAPI(title="NVMe Insight Analysis", version="1.1.0")
+app = FastAPI(
+    title="企业级 NVMe SSD 缓存与性能分析系统",
+    description="NVMe SSD 测试结果导入、缓存算法对比、IO 分析与异常告警平台",
+    version="1.1.0",
+)
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 
 
@@ -143,6 +148,20 @@ def import_analysis(request: ImportRequest):
     except (KeyError, TypeError, ValueError) as error:
         raise HTTPException(422, str(error)) from error
 
+    REPOSITORY.initialize()
+    run_id = REPOSITORY.save_run(result)
+    result["run_id"] = run_id
+    return result
+
+
+@app.post("/api/demo/load")
+def load_demo_case():
+    """Load a deterministic enterprise database example into the analysis UI."""
+    result = ingest_result(
+        build_demo_payload(),
+        name=DEMO_NAME,
+        cache_pages=64,
+    )
     REPOSITORY.initialize()
     run_id = REPOSITORY.save_run(result)
     result["run_id"] = run_id

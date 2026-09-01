@@ -1,4 +1,7 @@
-# Enterprise NVMe SSD Cache & Performance Analysis System
+# 企业级 NVMe SSD 缓存与性能分析系统
+
+> Enterprise NVMe SSD Cache & Performance Analysis System
+> 界面简称：NVMe Analyzer
 
 企业级 NVMe SSD 缓存与性能分析系统用于接收 SSD Benchmark、SSD PressureTest、
 FIO 等外部工具产生的结果，完成缓存算法对比、IO 统计、异常检测、告警和报告导出。
@@ -123,6 +126,28 @@ fio workload.fio --output-format=json --output=fio-result.json
 FIO 汇总格式不包含逐 IO LBA 时，系统只显示带宽、IOPS、读写量和延迟汇总，
 不会虚构冷热页或缓存命中数据。
 
+## 一键演示案例
+
+首页右上角提供“演示案例”按钮，不需要准备测试文件。案例模拟电商订单数据库的
+600 条 IO 访问，包含四个阶段：
+
+1. 热点事务：订单索引和活跃订单页被频繁读取；
+2. 混合报表：事务访问与历史数据查询同时运行；
+3. 维护扫描：顺序扫描冷页，并产生队列压力和延迟毛刺；
+4. 流量恢复：维护结束后，热点数据重新进入缓存。
+
+加载案例后，系统会自动完成：
+
+- P50/P95/P99/P999/P9999 延迟分析；
+- LRU-2、ARC、LIRS 缓存算法对比；
+- 冷热页与脏页驱逐统计；
+- 性能抖动和延迟毛刺检测；
+- SMART 温度告警；
+- JSON 和 CSV 报告生成。
+
+演示数据使用固定随机种子，每次生成结果一致，便于产品演示和验收测试。整个过程
+只在内存中构造 IO 样本，不会访问真实 NVMe 设备。
+
 ## CLI
 
 ```bash
@@ -214,7 +239,7 @@ python -m unittest discover -s tests -v
 
 ```ini
 [Unit]
-Description=NVMe Insight Analysis Service
+Description=Enterprise NVMe SSD Cache and Performance Analysis Service
 After=network.target
 
 [Service]

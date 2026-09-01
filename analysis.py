@@ -1,4 +1,4 @@
-"""Reusable performance-analysis algorithms for NVMe Insight.
+"""Algorithms for the Enterprise NVMe SSD Cache & Performance Analysis System.
 
 All functions operate on safe, collected samples and never access a device.
 """

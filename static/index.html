@@ -3,7 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>NVMe Insight Analysis</title>
+    <title>企业级 NVMe SSD 缓存与性能分析系统</title>
+    <meta
+      name="description"
+      content="面向企业级 NVMe SSD 的缓存算法、IO 性能、异常告警与测试结果分析平台"
+    />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link
       href="https://fonts.googleapis.com/css2?family=DM+Mono&family=Noto+Sans+SC:wght@400;500;600;700&display=swap"
@@ -15,9 +19,9 @@
   </head>
   <body>
     <aside>
-      <div class="brand">
+      <div class="brand" aria-label="企业级 NVMe SSD 缓存与性能分析系统">
         <span class="mark">N</span>
-        <div>NVMe <b>Insight</b><small>ANALYSIS LAB</small></div>
+        <div>NVMe <b>Analyzer</b><small>企业级缓存与性能分析</small></div>
       </div>
       <nav>
         <button class="active" data-view="overview">▦　概览</button>
@@ -41,6 +45,7 @@
         </div>
         <div class="header-actions">
           <span class="live"><i></i> 只读分析模式</span>
+          <button class="secondary" id="load-demo">▶ 演示案例</button>
           <button class="primary import-trigger">＋ 导入测试结果</button>
         </div>
       </header>

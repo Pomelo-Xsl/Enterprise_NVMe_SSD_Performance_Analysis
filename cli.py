@@ -1,4 +1,4 @@
-"""Command line entry point for safe NVMe Insight simulations and analysis."""
+"""CLI for the Enterprise NVMe SSD Cache & Performance Analysis System."""
 
 from __future__ import annotations
 import argparse
@@ -139,7 +139,8 @@ def export_full_report(args):
 
 def parser():
     root = argparse.ArgumentParser(
-        prog="nvme-insight", description="安全 NVMe 缓存与性能分析工具"
+        prog="nvme-analyzer",
+        description="企业级 NVMe SSD 缓存与性能结果分析工具",
     )
     commands = root.add_subparsers(dest="command", required=True)
     analyze = commands.add_parser("analyze-result", help="分析已有 JSON 样本")
