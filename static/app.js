@@ -309,14 +309,16 @@ async function loadDevices() {
   list.innerHTML = `<div class="panel skeleton"></div>`;
   try {
     state.devices = await api("/api/devices");
-    list.innerHTML = state.devices
-      .map(
-        (device) => `
+    list.innerHTML = state.devices.length
+      ? state.devices
+          .map(
+            (device) => `
           <article class="panel device" tabindex="0" role="button" aria-expanded="false">
             <div><h3>${device.model}</h3><p>${device.path} · SN ${device.serial} · FW ${device.firmware}</p></div>
             <div class="device-info">
               <div><span>容量</span>${device.capacity}</div>
               <div><span>接口</span>${device.pcie}</div>
+              <div><span>扇区</span>${device.sector_size ? `${device.sector_size} B` : "—"}</div>
               <div><span>写缓存</span>${device.cache}</div>
               <div><span>健康</span><b style="color:#61e1ad">${device.health}</b></div>
             </div>
@@ -328,8 +330,9 @@ async function loadDevices() {
             </div>
           </article>
         `,
-      )
-      .join("");
+          )
+          .join("")
+      : `<div class="panel empty-state"><h3>未发现NVMe Namespace</h3><p>请检查 nvme list -o json、lsblk、设备权限和服务日志。系统不会再用演示盘替代扫描失败结果。</p></div>`;
 
     $("#device-count").innerHTML =
       `${state.devices.length} <span>NVMe SSD</span>`;
@@ -337,6 +340,9 @@ async function loadDevices() {
     if (featured) {
       $("#featured-device").innerHTML =
         `<b>${featured.model}</b><span>${featured.path} · ${featured.pcie}</span>`;
+    } else {
+      $("#featured-device").innerHTML =
+        `<b>未发现真实NVMe设备</b><span>请检查只读扫描命令与权限</span>`;
     }
   } catch (error) {
     list.innerHTML = `<div class="panel empty-state">${error.message}</div>`;

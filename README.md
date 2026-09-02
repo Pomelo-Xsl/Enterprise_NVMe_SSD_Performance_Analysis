@@ -217,13 +217,24 @@ cache:
 
 ## 只读设备扫描
 
-Linux 安装 `nvme-cli` 后，可以显式开启：
+Linux 检测到 `nvme-cli` 或 `lsblk` 后会自动启用真实设备扫描。扫描过程只执行
+`nvme list -o json` 和 `lsblk --json`，用于兼容不同版本的 nvme-cli JSON 结构并补齐
+可能遗漏的 Namespace，不会运行测试或修改设备。
+
+也可以显式开启：
 
 ```bash
 NVME_USE_SYSTEM_SCAN=1 uvicorn app:app --host 127.0.0.1 --port 8000
 ```
 
-系统只运行 `nvme list -o json`，不会运行测试或修改设备。
+需要强制使用演示设备时，可以显式关闭：
+
+```bash
+NVME_USE_SYSTEM_SCAN=0 uvicorn app:app --host 127.0.0.1 --port 8000
+```
+
+真实扫描启用后，如果命令失败或没有发现设备，接口会返回空列表并在页面显示诊断提示，
+不再静默回退为两块演示设备，以免将扫描失败误判为真实设备数量。
 
 ## 测试
 

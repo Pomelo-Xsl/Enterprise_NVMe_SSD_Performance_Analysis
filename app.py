@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import json
+import logging
 import os
 import shutil
 import subprocess
@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from config import parse_application_config
 from demo_case import DEMO_NAME, build_demo_payload
+from device_discovery import discover_system_devices
 from exporters import (
     cache_comparison_csv,
     io_samples_csv,
@@ -31,6 +32,7 @@ from simulation import run_simulation
 ROOT = Path(__file__).parent
 DATABASE_PATH = Path(os.getenv("NVME_ANALYSIS_DB", str(ROOT / "nvme_analysis.db")))
 REPOSITORY = Repository(DATABASE_PATH)
+LOGGER = logging.getLogger(__name__)
 
 app = FastAPI(
     title="企业级 NVMe SSD 缓存与性能分析系统",
@@ -59,41 +61,28 @@ def index():
 
 
 def _system_devices() -> list[dict]:
-    raw = subprocess.run(
-        ["nvme", "list", "-o", "json"],
-        capture_output=True,
-        text=True,
-        timeout=8,
-        check=True,
-    )
-    found = json.loads(raw.stdout).get("Devices", [])
-    return [
-        {
-            "path": device.get("DevicePath", "Unknown"),
-            "model": device.get("ModelNumber", "Unknown NVMe"),
-            "serial": device.get("SerialNumber", "—"),
-            "firmware": device.get("Firmware", "—"),
-            "capacity": f"{device.get('UsedBytes', 0) / 1e12:.2f} TB",
-            "namespace": device.get("DevicePath", "").split("/")[-1],
-            "pcie": "读取设备信息",
-            "cache": "待读取",
-            "health": "待检查",
-            "source": "system-read-only",
-        }
-        for device in found
-    ]
+    return discover_system_devices()
+
+
+def _system_scan_enabled() -> bool:
+    """Auto-enable safe discovery on Linux while allowing an explicit opt-out."""
+    configured = os.getenv("NVME_USE_SYSTEM_SCAN", "auto").strip().lower()
+    if configured in {"0", "false", "no", "off", "demo"}:
+        return False
+    if configured in {"1", "true", "yes", "on"}:
+        return True
+    return os.name == "posix" and bool(shutil.which("nvme") or shutil.which("lsblk"))
 
 
 @app.get("/api/devices")
 def devices():
     """Return read-only system discovery or safe demonstration metadata."""
-    if os.getenv("NVME_USE_SYSTEM_SCAN") == "1" and shutil.which("nvme"):
+    if _system_scan_enabled():
         try:
-            discovered = _system_devices()
-            if discovered:
-                return discovered
-        except (subprocess.SubprocessError, json.JSONDecodeError, OSError):
-            pass
+            return _system_devices()
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+            LOGGER.warning("NVMe read-only discovery failed: %s", error)
+            return []
 
     return [
         {
