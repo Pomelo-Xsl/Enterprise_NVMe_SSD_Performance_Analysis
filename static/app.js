@@ -215,6 +215,9 @@ function showView(view, options = {}) {
 
 function goBack() {
   const previous = state.history.pop() || "overview";
+  if (state.view === "device-detail") {
+    window.history.replaceState(null, "", window.location.pathname);
+  }
   showView(previous);
 }
 
@@ -333,7 +336,7 @@ async function loadDevices() {
       ? state.devices
           .map(
             (device, index) => `
-          <article class="panel device" tabindex="0" role="button" data-device-index="${index}" aria-label="查看 ${escapeHtml(device.model)} 的完整设备信息">
+          <article class="panel device" tabindex="0" data-device-index="${index}" aria-label="查看 ${escapeHtml(device.model)} 的完整设备信息">
             <div class="device-identity"><h3>${escapeHtml(device.model)}</h3><p>${escapeHtml(device.path)} · SN ${escapeHtml(device.serial)} · FW ${escapeHtml(device.firmware)}</p></div>
             <div class="device-info">
               <div><span>容量</span>${escapeHtml(device.capacity)}</div>
@@ -342,7 +345,7 @@ async function loadDevices() {
               <div><span>写缓存</span>${escapeHtml(device.cache)}</div>
               <div><span>健康</span><b class="device-health">${escapeHtml(device.health)}</b></div>
             </div>
-            <span class="device-open">查看完整信息 <b>→</b></span>
+            <button type="button" class="device-open" data-device-index="${index}" aria-label="进入 ${escapeHtml(device.model)} 设备详情页">查看完整信息 <b>→</b></button>
           </article>
         `,
           )
@@ -472,8 +475,19 @@ function renderDeviceDetail(payload) {
 }
 
 async function loadDeviceDetail(device, navigate = true) {
+  if (!device?.namespace) {
+    notify("设备信息尚未加载完成，请重新扫描");
+    return;
+  }
   state.selectedDevice = device;
-  if (navigate) showView("device-detail", { remember: true });
+  if (navigate) {
+    window.history.replaceState(
+      null,
+      "",
+      `#device/${encodeURIComponent(device.namespace)}`,
+    );
+    showView("device-detail", { remember: true });
+  }
   $("#device-detail-content").innerHTML = `<div class="panel skeleton device-detail-skeleton"></div>`;
   try {
     const payload = await api(`/api/devices/${encodeURIComponent(device.namespace)}/details`);
@@ -944,8 +958,14 @@ function bindEvents() {
   $("#refresh-reports").addEventListener("click", loadReports);
 
   $("#device-list").addEventListener("click", (event) => {
+    event.preventDefault();
     const card = event.target.closest(".device");
-    if (card) loadDeviceDetail(state.devices[Number(card.dataset.deviceIndex)]);
+    if (!card) return;
+    const index = Number(
+      event.target.closest(".device-open")?.dataset.deviceIndex ??
+        card.dataset.deviceIndex,
+    );
+    loadDeviceDetail(state.devices[index]);
   });
   $("#device-list").addEventListener("keydown", (event) => {
     if (!["Enter", " "].includes(event.key)) return;
@@ -969,7 +989,17 @@ async function bootstrap() {
   ensureBackButton();
   bindEvents();
   await Promise.all([loadDevices(), loadOverview(), loadRuns()]);
-  showView("overview");
+  const detailMatch = window.location.hash.match(/^#device\/(.+)$/);
+  const namespace = detailMatch ? decodeURIComponent(detailMatch[1]) : null;
+  const linkedDevice = state.devices.find(
+    (device) => device.namespace === namespace,
+  );
+  if (linkedDevice) {
+    showView("devices");
+    loadDeviceDetail(linkedDevice, true);
+  } else {
+    showView("overview");
+  }
 }
 
 bootstrap().catch((error) => notify(error.message, 6000));

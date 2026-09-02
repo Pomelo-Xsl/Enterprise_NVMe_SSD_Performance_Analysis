@@ -9,7 +9,7 @@ import subprocess
 from pathlib import Path
 from typing import Literal, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -33,13 +33,26 @@ ROOT = Path(__file__).parent
 DATABASE_PATH = Path(os.getenv("NVME_ANALYSIS_DB", str(ROOT / "nvme_analysis.db")))
 REPOSITORY = Repository(DATABASE_PATH)
 LOGGER = logging.getLogger(__name__)
+BUILD_VERSION = "1.2.0"
 
 app = FastAPI(
     title="企业级 NVMe SSD 缓存与性能分析系统",
     description="NVMe SSD 测试结果导入、缓存算法对比、IO 分析与异常告警平台",
-    version="1.1.0",
+    version=BUILD_VERSION,
 )
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
+
+
+@app.middleware("http")
+async def prevent_stale_frontend_assets(request: Request, call_next):
+    """Force browsers and reverse proxies to revalidate the local dashboard."""
+    response = await call_next(request)
+    if request.url.path == "/" or request.url.path.endswith((".js", ".css", ".html")):
+        response.headers["Cache-Control"] = "no-store, max-age=0, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    response.headers["X-NVMe-Analyzer-Version"] = BUILD_VERSION
+    return response
 
 
 class ImportRequest(BaseModel):
@@ -58,6 +71,11 @@ def startup() -> None:
 @app.get("/", response_class=HTMLResponse)
 def index():
     return FileResponse(ROOT / "static" / "index.html")
+
+
+@app.get("/api/version")
+def application_version():
+    return {"version": BUILD_VERSION, "device_detail_view": True}
 
 
 def _system_devices() -> list[dict]:
