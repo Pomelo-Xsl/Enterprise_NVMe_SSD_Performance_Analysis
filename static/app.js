@@ -198,14 +198,71 @@ function goBack() {
   showView(previous);
 }
 
-function metricCard(label, value, hint) {
+function metricCard(label, value, hint, modifier = "") {
   return `
-    <div class="metric">
+    <div class="metric ${modifier}">
       <p>${label}</p>
       <b>${value}</b>
       <small>${hint}</small>
     </div>
   `;
+}
+
+function firstNumber(...values) {
+  return values.find((value) => Number.isFinite(Number(value)) && Number(value) > 0);
+}
+
+function formatLatency(value) {
+  return value ? `${Number(value).toFixed(2)} <em>μs</em>` : "—";
+}
+
+function formatBandwidth(report) {
+  const windows = report.io_statistics?.time_windows || [];
+  if (windows.length) {
+    const average =
+      windows.reduce(
+        (total, window) => total + Number(window.bandwidth_bytes_per_second || 0),
+        0,
+      ) / windows.length;
+    return average ? `${(average / 1_000_000).toFixed(2)} <em>MB/s</em>` : "—";
+  }
+
+  const fio = report.fio?.aggregate || {};
+  const fioBandwidth =
+    Number(fio.read_bandwidth_kib_s || 0) +
+    Number(fio.write_bandwidth_kib_s || 0);
+  if (fioBandwidth) return `${(fioBandwidth / 1024).toFixed(2)} <em>MB/s</em>`;
+
+  const performanceBandwidth = report.performance?.bandwidth?.average;
+  return performanceBandwidth
+    ? `${Number(performanceBandwidth).toFixed(2)} <em>MB/s</em>`
+    : "—";
+}
+
+function readWriteRatio(report) {
+  const directions = report.io_statistics?.directions;
+  const fio = report.fio?.aggregate;
+  const readRatio = directions?.read?.ratio ?? fio?.read_ratio;
+  const writeRatio = directions?.write?.ratio ?? fio?.write_ratio;
+  if (!Number.isFinite(Number(readRatio)) || !Number.isFinite(Number(writeRatio))) {
+    return "—";
+  }
+  return `${Math.round(Number(readRatio) * 100)}<em>%</em> / ${Math.round(Number(writeRatio) * 100)}<em>%</em>`;
+}
+
+function formatBytes(bytes) {
+  const value = Number(bytes || 0);
+  if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(0)} MiB`;
+  if (value >= 1024) return `${(value / 1024).toFixed(0)} KiB`;
+  return value ? `${value} B` : "—";
+}
+
+function dominantEntry(source, valueKey = "operations") {
+  const [entry] = Object.entries(source || {}).sort(
+    ([, left], [, right]) =>
+      Number(right[valueKey] || 0) - Number(left[valueKey] || 0),
+  );
+  return entry ? { key: entry[0], value: entry[1] } : null;
 }
 
 function disposeChart(id) {
@@ -325,44 +382,100 @@ async function loadRuns(preferredId = null) {
 
 function analysisMetrics(report) {
   const latency = report.io_statistics?.latency || {};
-  const comparison = report.cache_comparison || {};
-  const fio = report.fio?.aggregate || {};
+  const performanceLatency = report.performance?.latency || {};
+  const p50 = firstNumber(latency.p50_us, performanceLatency.p50);
+  const p99 = firstNumber(latency.p99_us, performanceLatency.p99);
   return [
     metricCard(
-      "样本数量",
-      report.sample_count || 0,
-      report.source_format || report.mode,
+      "P50 延迟",
+      formatLatency(p50),
+      "典型请求延迟",
+      "analysis-kpi latency-typical",
     ),
     metricCard(
       "P99 延迟",
-      latency.p99_us ? `${latency.p99_us.toFixed(2)} μs` : "—",
-      "LATENCY",
+      formatLatency(p99),
+      "尾部请求延迟",
+      "analysis-kpi latency-tail",
     ),
     metricCard(
-      "最佳算法",
-      comparison.best_algorithm?.toUpperCase() || "—",
-      "CACHE",
+      "平均带宽",
+      formatBandwidth(report),
+      "分析时间窗口均值",
+      "analysis-kpi bandwidth",
     ),
     metricCard(
-      "读带宽",
-      fio.read_bandwidth_kib_s
-        ? `${fio.read_bandwidth_kib_s.toFixed(0)} KiB/s`
-        : "—",
-      "FIO",
+      "读写比例",
+      readWriteRatio(report),
+      "READ / WRITE",
+      "analysis-kpi ratio",
     ),
   ];
 }
 
+function analysisProfile(report) {
+  const io = report.io_statistics || {};
+  const dominantBlock = dominantEntry(io.block_sizes);
+  const dominantQueue = dominantEntry(io.queue_depths);
+  const comparison = report.cache_comparison || {};
+  const bestName = comparison.best_algorithm;
+  const best = comparison.algorithms?.[bestName] || {};
+  const alerts = report.alerts?.summary || {};
+  const stability = report.performance?.stability || "等待完整时序";
+
+  return `
+    <div class="analysis-insight-grid">
+      <article class="panel analysis-insight-card">
+        <div class="insight-card-head"><span>WORKLOAD</span><i></i></div>
+        <h3>负载画像</h3>
+        <dl class="analysis-facts">
+          <div><dt>样本数量</dt><dd>${Number(report.sample_count || 0).toLocaleString()}</dd></div>
+          <div><dt>主要块大小</dt><dd>${formatBytes(dominantBlock?.value?.block_size_bytes)}</dd></div>
+          <div><dt>主要队列深度</dt><dd>${dominantQueue ? `QD ${dominantQueue.key}` : "—"}</dd></div>
+          <div><dt>唯一 LBA</dt><dd>${io.unique_lbas ?? "—"}</dd></div>
+        </dl>
+      </article>
+      <article class="panel analysis-insight-card">
+        <div class="insight-card-head"><span>CACHE</span><i></i></div>
+        <h3>缓存建议</h3>
+        <div class="recommendation-value">${bestName ? bestName.toUpperCase() : "暂无访问流"}</div>
+        <p>${bestName ? `命中率 ${(Number(best.hit_ratio || 0) * 100).toFixed(2)}%，脏页驱逐 ${best.dirty_evictions || 0} 次。` : "导入含逐 IO LBA 的结果后生成算法建议。"}</p>
+      </article>
+      <article class="panel analysis-insight-card">
+        <div class="insight-card-head"><span>HEALTH</span><i></i></div>
+        <h3>分析状态</h3>
+        <div class="recommendation-value ${alerts.critical ? "risk" : ""}">${alerts.critical ? `${alerts.critical} 严重事件` : stability}</div>
+        <p>待处理告警 ${Number(alerts.critical || 0) + Number(alerts.warning || 0)} 项，分析结果仅用于只读评估。</p>
+      </article>
+    </div>
+  `;
+}
+
 function renderAnalysisChart(report) {
   const samples = report.samples || [];
+  const windows = report.io_statistics?.time_windows || [];
   const element = $("#analysis-chart");
-  if (!element || !samples.length || typeof echarts === "undefined") return;
+  if (!element || (!samples.length && !windows.length) || typeof echarts === "undefined") return;
+
+  const timeline = windows.length
+    ? windows.map((window) => ({
+        label: `${(Number(window.start_ms || 0) / 1000).toFixed(1)}s`,
+        bandwidth: Number(window.bandwidth_bytes_per_second || 0) / 1_000_000,
+        latency: Number(window.p99_latency_us || 0),
+      }))
+    : samples.map((sample) => ({
+        label: `${Number(sample.timestamp_ms || 0)}ms`,
+        bandwidth:
+          (Number(sample.size_bytes || 0) / Math.max(Number(sample.latency_us || 0), 1)),
+        latency: Number(sample.latency_us || 0),
+      }));
 
   disposeChart("analysis-chart");
   const chart = echarts.init(element);
   state.charts.set("analysis-chart", chart);
   chart.setOption({
-    grid: { left: 55, right: 55, top: 35, bottom: 35 },
+    backgroundColor: "transparent",
+    grid: { left: 58, right: 60, top: 58, bottom: 42 },
     tooltip: { trigger: "axis" },
     legend: {
       data: ["估算带宽 MB/s", "延迟 μs"],
@@ -370,15 +483,24 @@ function renderAnalysisChart(report) {
     },
     xAxis: {
       type: "category",
-      data: samples.map((sample) => sample.timestamp_ms),
+      data: timeline.map((point) => point.label),
       axisLabel: { color: "#87958f" },
+      axisLine: { lineStyle: { color: "#294039" } },
+      axisTick: { show: false },
     },
     yAxis: [
       {
+        name: "MB/s",
+        nameTextStyle: { color: "#66766f" },
         axisLabel: { color: "#87958f" },
         splitLine: { lineStyle: { color: "#1c2c26" } },
       },
-      { axisLabel: { color: "#87958f" }, splitLine: { show: false } },
+      {
+        name: "μs",
+        nameTextStyle: { color: "#66766f" },
+        axisLabel: { color: "#87958f" },
+        splitLine: { show: false },
+      },
     ],
     series: [
       {
@@ -386,10 +508,9 @@ function renderAnalysisChart(report) {
         type: "line",
         smooth: true,
         symbol: "none",
-        data: samples.map(
-          (sample) => sample.size_bytes / Math.max(sample.latency_us, 1),
-        ),
-        lineStyle: { color: "#61e1ad" },
+        data: timeline.map((point) => point.bandwidth),
+        lineStyle: { color: "#61e1ad", width: 2.5 },
+        areaStyle: { color: "rgba(97, 225, 173, 0.08)" },
       },
       {
         name: "延迟 μs",
@@ -397,8 +518,8 @@ function renderAnalysisChart(report) {
         yAxisIndex: 1,
         smooth: true,
         symbol: "none",
-        data: samples.map((sample) => sample.latency_us),
-        lineStyle: { color: "#f6b75a" },
+        data: timeline.map((point) => point.latency),
+        lineStyle: { color: "#f6b75a", width: 2 },
       },
     ],
   });
@@ -437,10 +558,16 @@ function renderAnalysis() {
     `${report.configuration?.scenario?.name || "分析记录"} · ${report.source_format || report.mode}`;
   $("#analysis-content").innerHTML = `
     ${casePanel}
-    <div class="summary-grid">${analysisMetrics(report).join("")}</div>
-    <div class="panel">
+    <div class="analysis-record-strip">
+      <div><span>ANALYSIS RECORD</span><b>#${id || "LOCAL"}</b></div>
+      <div><span>数据来源</span><b>${report.source_format || report.mode || "未知"}</b></div>
+      <div><span>生成时间</span><b>${report.generated_at ? new Date(report.generated_at).toLocaleString("zh-CN", { hour12: false }) : "—"}</b></div>
+      <div class="analysis-safe"><i></i><b>只读分析</b></div>
+    </div>
+    <div class="analysis-kpi-grid">${analysisMetrics(report).join("")}</div>
+    <div class="panel analysis-chart-panel">
       <div class="panel-head">
-        <div><h3>IO 时序分析</h3><p>导入样本的带宽与延迟关系</p></div>
+        <div><p class="eyebrow">PERFORMANCE TIMELINE</p><h3>IO 时序分析</h3><p>带宽与尾延迟的时间窗口关系</p></div>
         <div class="download-group">
           <a href="/api/scenarios/runs/${id}/export/json">JSON</a>
           <a href="/api/scenarios/runs/${id}/export/summary">汇总</a>
@@ -449,8 +576,9 @@ function renderAnalysis() {
         </div>
       </div>
       <div id="analysis-chart" class="chart"></div>
-      ${report.samples?.length ? "" : '<div class="empty-state">该格式没有逐 IO 时序样本，汇总指标仍可正常导出。</div>'}
+      ${report.samples?.length || report.io_statistics?.time_windows?.length ? "" : '<div class="empty-state">该格式没有逐 IO 时序样本，汇总指标仍可正常导出。</div>'}
     </div>
+    ${analysisProfile(report)}
   `;
   requestAnimationFrame(() => renderAnalysisChart(report));
 }
