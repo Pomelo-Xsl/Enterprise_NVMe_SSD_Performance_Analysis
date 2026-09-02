@@ -6,6 +6,7 @@ const state = {
   runs: [],
   selectedRun: null,
   cacheResult: null,
+  selectedDevice: null,
   view: "overview",
   history: [],
   charts: new Map(),
@@ -14,6 +15,7 @@ const state = {
 const TITLES = {
   overview: "分析概览",
   devices: "设备信息",
+  "device-detail": "设备详情",
   analysis: "结果分析",
   "cache-lab": "缓存算法实验室",
   alerts: "告警中心",
@@ -66,7 +68,25 @@ function createSection(id, content) {
   $("main").append(section);
 }
 
+function escapeHtml(value) {
+  return String(value ?? "—")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
 function installFeaturePages() {
+  createSection(
+    "device-detail",
+    `
+      <div id="device-detail-content">
+        <div class="panel skeleton"></div>
+      </div>
+    `,
+  );
+
   createSection(
     "cache-lab",
     `
@@ -312,22 +332,17 @@ async function loadDevices() {
     list.innerHTML = state.devices.length
       ? state.devices
           .map(
-            (device) => `
-          <article class="panel device" tabindex="0" role="button" aria-expanded="false">
-            <div><h3>${device.model}</h3><p>${device.path} · SN ${device.serial} · FW ${device.firmware}</p></div>
+            (device, index) => `
+          <article class="panel device" tabindex="0" role="button" data-device-index="${index}" aria-label="查看 ${escapeHtml(device.model)} 的完整设备信息">
+            <div class="device-identity"><h3>${escapeHtml(device.model)}</h3><p>${escapeHtml(device.path)} · SN ${escapeHtml(device.serial)} · FW ${escapeHtml(device.firmware)}</p></div>
             <div class="device-info">
-              <div><span>容量</span>${device.capacity}</div>
-              <div><span>接口</span>${device.pcie}</div>
+              <div><span>容量</span>${escapeHtml(device.capacity)}</div>
+              <div><span>接口</span>${escapeHtml(device.pcie)}</div>
               <div><span>扇区</span>${device.sector_size ? `${device.sector_size} B` : "—"}</div>
-              <div><span>写缓存</span>${device.cache}</div>
-              <div><span>健康</span><b style="color:#61e1ad">${device.health}</b></div>
+              <div><span>写缓存</span>${escapeHtml(device.cache)}</div>
+              <div><span>健康</span><b class="device-health">${escapeHtml(device.health)}</b></div>
             </div>
-            <span class="device-toggle">展开详情 ↓</span>
-            <div class="device-detail">
-              <div><b>Namespace</b>${device.namespace}</div>
-              <div><b>数据来源</b>${device.source}</div>
-              <div><b>系统定位</b>只读分析，不执行 Benchmark 或 PressureTest</div>
-            </div>
+            <span class="device-open">查看完整信息 <b>→</b></span>
           </article>
         `,
           )
@@ -349,13 +364,124 @@ async function loadDevices() {
   }
 }
 
-function toggleDevice(card) {
-  const expanded = !card.classList.contains("expanded");
-  card.classList.toggle("expanded", expanded);
-  card.setAttribute("aria-expanded", String(expanded));
-  $(".device-toggle", card).textContent = expanded
-    ? "收起详情 ↑"
-    : "展开详情 ↓";
+function formatCapacity(bytes) {
+  const value = Number(bytes || 0);
+  if (!value) return "—";
+  if (value >= 1e12) return `${(value / 1e12).toFixed(2)} TB`;
+  if (value >= 1e9) return `${(value / 1e9).toFixed(2)} GB`;
+  return `${value.toLocaleString()} B`;
+}
+
+function formatCounter(value) {
+  const number = Number(value || 0);
+  return number ? number.toLocaleString("zh-CN") : "0";
+}
+
+function detailRow(label, value, hint = "") {
+  return `<div class="detail-row"><span>${label}</span><b>${escapeHtml(value)}</b>${hint ? `<small>${escapeHtml(hint)}</small>` : ""}</div>`;
+}
+
+function renderDeviceDetail(payload) {
+  const device = payload.device || {};
+  const smart = payload.smart || {};
+  const controller = payload.controller || {};
+  const namespace = payload.namespace || {};
+  const errors = payload.errors || {};
+  const health = payload.health || { level: "unknown", label: "未知", risks: [] };
+  const smartAvailable = payload.collection?.command_status?.smart === "ok" || payload.collection?.command_status?.smart === "demo";
+  const temperature = smartAvailable && Number(smart.temperature_c) ? `${smart.temperature_c} °C` : "暂无数据";
+  const remaining = smartAvailable ? `${smart.life_remaining_percent}%` : "暂无数据";
+  const spare = smartAvailable ? `${smart.available_spare_percent}%` : "暂无数据";
+  const commandStatus = payload.collection?.command_status || {};
+  const sourceLabels = Object.entries(commandStatus)
+    .map(([name, status]) => `<span class="command-chip ${status === "ok" || status === "demo" ? "ok" : "muted"}">${escapeHtml(name)} · ${status === "ok" ? "已读取" : status === "demo" ? "演示" : "不可用"}</span>`)
+    .join("");
+  const risks = health.risks?.length
+    ? health.risks.map((risk) => `<li class="${escapeHtml(risk.level)}">${escapeHtml(risk.message)}</li>`).join("")
+    : `<li class="healthy">当前未发现 SMART 风险项</li>`;
+
+  $("#device-detail-content").innerHTML = `
+    <div class="section-head device-detail-heading">
+      <div>
+        <p class="detail-kicker">NVME NAMESPACE · ${escapeHtml(device.namespace)}</p>
+        <h2>${escapeHtml(device.model)}</h2>
+        <p>${escapeHtml(device.path)} · SN ${escapeHtml(device.serial)} · FW ${escapeHtml(device.firmware)}</p>
+      </div>
+      <div class="toolbar">
+        <span class="health-badge ${escapeHtml(health.level)}"><i></i>${escapeHtml(health.label)}</span>
+        <button class="secondary" id="refresh-device-detail">↻ 刷新详情</button>
+      </div>
+    </div>
+
+    <div class="device-detail-kpis">
+      ${metricCard("当前温度", temperature, smartAvailable ? "SMART COMPOSITE" : "SMART 未读取", "device-kpi")}
+      ${metricCard("预估剩余寿命", remaining, smartAvailable ? `已使用 ${smart.percentage_used}%` : "暂无磨损数据", "device-kpi")}
+      ${metricCard("可用备用空间", spare, smartAvailable ? `告警阈值 ${smart.spare_threshold_percent}%` : "暂无备用空间数据", "device-kpi")}
+      ${metricCard("介质错误", smartAvailable ? formatCounter(smart.media_errors) : "暂无数据", smartAvailable ? `错误日志 ${formatCounter(errors.total_error_count)}` : "SMART 未读取", "device-kpi")}
+    </div>
+
+    <div class="device-detail-grid">
+      <div class="panel detail-panel">
+        <div class="panel-head"><div><h3>设备身份与控制器</h3><p>Identify Controller 只读信息</p></div><span class="tag teal">IDENTIFY</span></div>
+        <div class="detail-rows">
+          ${detailRow("设备路径", device.path)}
+          ${detailRow("序列号", device.serial)}
+          ${detailRow("固件版本", device.firmware)}
+          ${detailRow("NVMe 规范", controller.nvme_version || "暂无数据")}
+          ${detailRow("控制器 ID", controller.controller_id || "暂无数据")}
+          ${detailRow("Namespace 数量", controller.namespace_count || "暂无数据")}
+          ${detailRow("易失性写缓存", controller.volatile_write_cache_supported ? "支持" : "未报告支持")}
+        </div>
+      </div>
+
+      <div class="panel detail-panel">
+        <div class="panel-head"><div><h3>Namespace 与容量</h3><p>格式、使用量与逻辑块信息</p></div><span class="tag">CAPACITY</span></div>
+        <div class="capacity-bar"><i style="width:${namespace.capacity_bytes ? Math.min(100, Number(namespace.utilized_bytes || 0) / Number(namespace.capacity_bytes) * 100) : 0}%"></i></div>
+        <div class="detail-rows">
+          ${detailRow("标称容量", device.capacity || formatCapacity(namespace.capacity_bytes))}
+          ${detailRow("已使用容量", formatCapacity(namespace.utilized_bytes))}
+          ${detailRow("可用容量", namespace.capacity_bytes ? formatCapacity(Math.max(0, namespace.capacity_bytes - Number(namespace.utilized_bytes || 0))) : "暂无数据")}
+          ${detailRow("逻辑块大小", `${namespace.lba_size_bytes || device.sector_size || "—"} B`)}
+          ${detailRow("精简配置", namespace.thin_provisioning ? "支持" : "未启用")}
+          ${detailRow("数据来源", device.source)}
+        </div>
+      </div>
+
+      <div class="panel detail-panel">
+        <div class="panel-head"><div><h3>生命周期与工作量</h3><p>累计 SMART 计数器</p></div><span class="tag">LIFETIME</span></div>
+        <div class="detail-rows">
+          ${detailRow("累计读取", formatCapacity(smart.data_read_bytes), `${formatCounter(smart.data_units_read)} Data Units`)}
+          ${detailRow("累计写入", formatCapacity(smart.data_written_bytes), `${formatCounter(smart.data_units_written)} Data Units`)}
+          ${detailRow("主机读命令", formatCounter(smart.host_read_commands))}
+          ${detailRow("主机写命令", formatCounter(smart.host_write_commands))}
+          ${detailRow("通电时间", smartAvailable ? `${formatCounter(smart.power_on_hours)} 小时` : "暂无数据")}
+          ${detailRow("通电次数", smartAvailable ? formatCounter(smart.power_cycles) : "暂无数据")}
+          ${detailRow("异常断电", smartAvailable ? formatCounter(smart.unsafe_shutdowns) : "暂无数据")}
+        </div>
+      </div>
+
+      <div class="panel detail-panel">
+        <div class="panel-head"><div><h3>健康判断与采集状态</h3><p>风险摘要及只读命令可用性</p></div><span class="tag ${health.level === "healthy" ? "teal" : ""}">HEALTH</span></div>
+        <ul class="risk-list">${risks}</ul>
+        <div class="command-status">${sourceLabels}</div>
+        <p class="collection-note">采集模式：${escapeHtml(payload.collection?.mode)} · ${escapeHtml(payload.collection?.collected_at)}</p>
+      </div>
+    </div>
+  `;
+  $("#refresh-device-detail").addEventListener("click", () => loadDeviceDetail(device, false));
+}
+
+async function loadDeviceDetail(device, navigate = true) {
+  state.selectedDevice = device;
+  if (navigate) showView("device-detail", { remember: true });
+  $("#device-detail-content").innerHTML = `<div class="panel skeleton device-detail-skeleton"></div>`;
+  try {
+    const payload = await api(`/api/devices/${encodeURIComponent(device.namespace)}/details`);
+    renderDeviceDetail(payload);
+  } catch (error) {
+    $("#device-detail-content").innerHTML = `<div class="panel empty-state"><h3>设备详情读取失败</h3><p>${escapeHtml(error.message)}</p><button class="secondary" id="retry-device-detail">重新读取</button></div>`;
+    $("#retry-device-detail").addEventListener("click", () => loadDeviceDetail(device, false));
+  }
 }
 
 async function loadRuns(preferredId = null) {
@@ -819,14 +945,14 @@ function bindEvents() {
 
   $("#device-list").addEventListener("click", (event) => {
     const card = event.target.closest(".device");
-    if (card) toggleDevice(card);
+    if (card) loadDeviceDetail(state.devices[Number(card.dataset.deviceIndex)]);
   });
   $("#device-list").addEventListener("keydown", (event) => {
     if (!["Enter", " "].includes(event.key)) return;
     const card = event.target.closest(".device");
     if (card) {
       event.preventDefault();
-      toggleDevice(card);
+      loadDeviceDetail(state.devices[Number(card.dataset.deviceIndex)]);
     }
   });
   $(".hero").addEventListener("click", () =>

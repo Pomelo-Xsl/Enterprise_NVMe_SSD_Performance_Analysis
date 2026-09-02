@@ -4,6 +4,7 @@ import unittest
 from types import SimpleNamespace
 
 from device_discovery import (
+    collect_device_details,
     discover_system_devices,
     merge_devices,
     parse_lsblk_json,
@@ -168,6 +169,65 @@ class DeviceDiscoveryTests(unittest.TestCase):
 
         self.assertEqual([device["path"] for device in devices], ["/dev/nvme2n1"])
         self.assertEqual(devices[0]["sector_size"], 4096)
+
+    def test_device_details_collects_smart_identity_and_namespace_data(self):
+        responses = {
+            "smart-log": {
+                "temperature": 44,
+                "avail_spare": 98,
+                "spare_thresh": 10,
+                "percentage_used": 6,
+                "data_units_read": 100,
+                "data_units_written": 80,
+                "power_on_hours": 1200,
+                "media_errors": 0,
+            },
+            "id-ctrl": {"vid": 5197, "ver": 0x10400, "nn": 1, "vwc": 1},
+            "id-ns": {
+                "nsze": 1000,
+                "ncap": 1000,
+                "nuse": 400,
+                "flbas": 0,
+                "lbafs": [{"ds": 12}],
+            },
+            "error-log": [{"error_count": 0}],
+        }
+
+        def runner(command, **_kwargs):
+            return SimpleNamespace(stdout=json.dumps(responses[command[1]]))
+
+        result = collect_device_details(
+            {
+                "path": "/dev/nvme2n1",
+                "namespace": "nvme2n1",
+                "model": "TU2E3T803311",
+            },
+            runner=runner,
+            which=lambda _command: "/usr/bin/nvme",
+        )
+
+        self.assertEqual(result["health"]["level"], "healthy")
+        self.assertEqual(result["smart"]["temperature_c"], 44)
+        self.assertEqual(result["smart"]["life_remaining_percent"], 94)
+        self.assertEqual(result["controller"]["nvme_version"], "1.4.0")
+        self.assertEqual(result["namespace"]["lba_size_bytes"], 4096)
+        self.assertEqual(result["namespace"]["utilized_bytes"], 400 * 4096)
+
+    def test_device_details_remains_available_when_smart_requires_permission(self):
+        def runner(command, **_kwargs):
+            if command[1] == "smart-log":
+                raise subprocess.CalledProcessError(13, command)
+            return SimpleNamespace(stdout="{}" if command[1] != "error-log" else "[]")
+
+        result = collect_device_details(
+            {"path": "/dev/nvme2n1", "namespace": "nvme2n1"},
+            runner=runner,
+            which=lambda _command: "/usr/bin/nvme",
+        )
+
+        self.assertEqual(result["health"]["level"], "unknown")
+        self.assertIn("unavailable", result["collection"]["command_status"]["smart"])
+        self.assertEqual(result["collection"]["command_status"]["controller"], "ok")
 
 
 if __name__ == "__main__":

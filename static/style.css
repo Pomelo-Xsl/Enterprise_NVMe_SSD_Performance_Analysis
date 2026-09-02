@@ -350,8 +350,9 @@ h2 {
 }
 .device {
   padding: 21px;
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(270px, 1.25fr) minmax(440px, 1fr) auto;
+  gap: 26px;
   align-items: center;
 }
 .device h3 {
@@ -363,8 +364,9 @@ h2 {
   margin: 0;
 }
 .device-info {
-  display: flex;
-  gap: 30px;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(64px, 1fr));
+  gap: 18px;
 }
 .device-info div {
   color: #b7c6bf;

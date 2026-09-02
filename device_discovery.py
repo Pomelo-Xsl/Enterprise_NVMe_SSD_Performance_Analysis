@@ -12,6 +12,13 @@ import re
 import shutil
 import subprocess
 from collections.abc import Callable
+from datetime import datetime, timezone
+
+from nvme_parser import (
+    parse_error_log,
+    parse_identify_controller,
+    parse_identify_namespace,
+)
 
 
 NAMESPACE_PATH = re.compile(r"^/dev/nvme\d+(?:c\d+)?n\d+$")
@@ -213,6 +220,146 @@ def merge_devices(*collections: list[dict]) -> list[dict]:
                 _merge_device(merged[path], device) if path in merged else dict(device)
             )
     return [merged[path] for path in sorted(merged, key=_namespace_sort_key)]
+
+
+def _temperature_celsius(value) -> float:
+    temperature = float(_number(value, 0))
+    # Some nvme-cli releases expose Kelvin while recent versions use Celsius.
+    return round(temperature - 273.15, 1) if temperature > 200 else temperature
+
+
+def _nvme_version(value: int) -> str:
+    value = int(value or 0)
+    if not value:
+        return "未知"
+    return f"{(value >> 16) & 0xFFFF}.{(value >> 8) & 0xFF}.{value & 0xFF}"
+
+
+def _smart_details(data: dict) -> dict:
+    percentage_used = _number(
+        _first(data, "percentage_used", "percentage_used_percent", default=0)
+    )
+    data_units_read = _number(_first(data, "data_units_read", default=0))
+    data_units_written = _number(_first(data, "data_units_written", default=0))
+    return {
+        "critical_warning": _number(_first(data, "critical_warning", default=0)),
+        "temperature_c": _temperature_celsius(
+            _first(data, "temperature", "temperature_celsius", default=0)
+        ),
+        "available_spare_percent": _number(
+            _first(data, "avail_spare", "available_spare", default=0)
+        ),
+        "spare_threshold_percent": _number(
+            _first(data, "spare_thresh", "available_spare_threshold", default=0)
+        ),
+        "percentage_used": percentage_used,
+        "life_remaining_percent": max(0, 100 - percentage_used),
+        "data_units_read": data_units_read,
+        "data_units_written": data_units_written,
+        "data_read_bytes": data_units_read * 512_000,
+        "data_written_bytes": data_units_written * 512_000,
+        "host_read_commands": _number(_first(data, "host_read_commands", default=0)),
+        "host_write_commands": _number(_first(data, "host_write_commands", default=0)),
+        "controller_busy_minutes": _number(
+            _first(data, "controller_busy_time", default=0)
+        ),
+        "power_cycles": _number(_first(data, "power_cycles", default=0)),
+        "power_on_hours": _number(_first(data, "power_on_hours", default=0)),
+        "unsafe_shutdowns": _number(_first(data, "unsafe_shutdowns", default=0)),
+        "media_errors": _number(_first(data, "media_errors", default=0)),
+        "error_log_entries": _number(
+            _first(data, "num_err_log_entries", "error_log_entries", default=0)
+        ),
+        "warning_temperature_minutes": _number(
+            _first(data, "warning_temp_time", default=0)
+        ),
+        "critical_temperature_minutes": _number(
+            _first(data, "critical_comp_time", default=0)
+        ),
+    }
+
+
+def _health_summary(smart: dict, smart_available: bool) -> dict:
+    risks: list[dict] = []
+    if not smart_available:
+        return {"level": "unknown", "label": "SMART 未读取", "risks": risks}
+    if smart["critical_warning"]:
+        risks.append({"level": "critical", "message": "设备报告 Critical Warning"})
+    if smart["temperature_c"] >= 75:
+        risks.append({"level": "critical", "message": "当前温度达到临界阈值"})
+    elif smart["temperature_c"] >= 65:
+        risks.append({"level": "warning", "message": "当前温度偏高"})
+    if smart["percentage_used"] >= 90:
+        risks.append({"level": "warning", "message": "介质寿命接近耗尽"})
+    if smart["media_errors"]:
+        risks.append({"level": "critical", "message": "检测到介质或数据完整性错误"})
+    if risks:
+        level = "critical" if any(item["level"] == "critical" for item in risks) else "warning"
+        return {"level": level, "label": "需要关注", "risks": risks}
+    return {"level": "healthy", "label": "健康", "risks": risks}
+
+
+def collect_device_details(
+    device: dict,
+    runner: Callable = subprocess.run,
+    which: Callable = shutil.which,
+) -> dict:
+    """Collect detailed, read-only identity and SMART data for one namespace."""
+    nvme = which("nvme")
+    payloads: dict[str, dict | list] = {}
+    command_status: dict[str, str] = {}
+    commands = {
+        "smart": ["smart-log"],
+        "controller": ["id-ctrl"],
+        "namespace": ["id-ns"],
+        "errors": ["error-log"],
+    }
+    if nvme:
+        for name, arguments in commands.items():
+            try:
+                completed = runner(
+                    [nvme, *arguments, device["path"], "-o", "json"],
+                    capture_output=True,
+                    text=True,
+                    timeout=8,
+                    check=True,
+                )
+                payloads[name] = json.loads(completed.stdout)
+                command_status[name] = "ok"
+            except (OSError, subprocess.SubprocessError, json.JSONDecodeError, ValueError) as exc:
+                command_status[name] = f"unavailable: {exc}"
+    else:
+        command_status = {name: "nvme-cli unavailable" for name in commands}
+
+    smart_payload = payloads.get("smart", {})
+    smart = _smart_details(smart_payload if isinstance(smart_payload, dict) else {})
+    controller_payload = payloads.get("controller", {})
+    controller = parse_identify_controller(
+        controller_payload if isinstance(controller_payload, dict) else {}
+    )
+    controller["nvme_version"] = _nvme_version(controller.get("version", 0))
+    namespace_payload = payloads.get("namespace", {})
+    namespace = parse_identify_namespace(
+        namespace_payload if isinstance(namespace_payload, dict) else {}
+    )
+    try:
+        errors = parse_error_log(payloads.get("errors", []))
+    except ValueError:
+        errors = parse_error_log([])
+    smart_available = command_status.get("smart") == "ok"
+    return {
+        "device": device,
+        "health": _health_summary(smart, smart_available),
+        "smart": smart,
+        "controller": controller,
+        "namespace": namespace,
+        "errors": errors,
+        "collection": {
+            "mode": "read-only",
+            "collected_at": datetime.now(timezone.utc).isoformat(),
+            "command_status": command_status,
+        },
+    }
 
 
 def discover_system_devices(

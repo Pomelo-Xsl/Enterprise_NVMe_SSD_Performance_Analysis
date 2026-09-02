@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from config import parse_application_config
 from demo_case import DEMO_NAME, build_demo_payload
-from device_discovery import discover_system_devices
+from device_discovery import collect_device_details, discover_system_devices
 from exporters import (
     cache_comparison_csv,
     io_samples_csv,
@@ -84,6 +84,11 @@ def devices():
             LOGGER.warning("NVMe read-only discovery failed: %s", error)
             return []
 
+    return _demo_devices()
+
+
+def _demo_devices() -> list[dict]:
+    """Return stable read-only metadata when system discovery is disabled."""
     return [
         {
             "path": "/dev/nvme0n1",
@@ -96,6 +101,8 @@ def devices():
             "cache": "Supported · Enabled",
             "health": "良好",
             "source": "demonstration",
+            "sector_size": 4096,
+            "capacity_bytes": 3_840_000_000_000,
         },
         {
             "path": "/dev/nvme1n1",
@@ -108,8 +115,90 @@ def devices():
             "cache": "Supported · Enabled",
             "health": "良好",
             "source": "demonstration",
+            "sector_size": 4096,
+            "capacity_bytes": 1_920_000_000_000,
         },
     ]
+
+
+def _demo_device_detail(device: dict) -> dict:
+    """Provide a complete UI example without touching a local block device."""
+    second = device["namespace"] == "nvme1n1"
+    smart = {
+        "critical_warning": 0,
+        "temperature_c": 39 if second else 42,
+        "available_spare_percent": 100,
+        "spare_threshold_percent": 10,
+        "percentage_used": 7 if second else 12,
+        "life_remaining_percent": 93 if second else 88,
+        "data_units_read": 12_840_300 if second else 28_450_200,
+        "data_units_written": 8_920_100 if second else 21_780_400,
+        "data_read_bytes": (12_840_300 if second else 28_450_200) * 512_000,
+        "data_written_bytes": (8_920_100 if second else 21_780_400) * 512_000,
+        "host_read_commands": 38_214_090 if second else 74_930_120,
+        "host_write_commands": 24_908_330 if second else 62_108_870,
+        "controller_busy_minutes": 4_820 if second else 9_240,
+        "power_cycles": 48 if second else 76,
+        "power_on_hours": 8_640 if second else 15_320,
+        "unsafe_shutdowns": 1 if second else 2,
+        "media_errors": 0,
+        "error_log_entries": 0,
+        "warning_temperature_minutes": 0,
+        "critical_temperature_minutes": 0,
+    }
+    return {
+        "device": device,
+        "health": {"level": "healthy", "label": "健康", "risks": []},
+        "smart": smart,
+        "controller": {
+            "vendor_id": 5197 if second else 5198,
+            "subsystem_vendor_id": 5197 if second else 5198,
+            "controller_id": 1,
+            "namespace_count": 1,
+            "nvme_version": "1.4.0",
+            "maximum_data_transfer_size": 7,
+            "volatile_write_cache_supported": True,
+        },
+        "namespace": {
+            "lba_size_bytes": device["sector_size"],
+            "size_bytes": device["capacity_bytes"],
+            "capacity_bytes": device["capacity_bytes"],
+            "utilized_bytes": int(device["capacity_bytes"] * (0.61 if second else 0.74)),
+            "thin_provisioning": False,
+            "formatted_lba_index": 0,
+        },
+        "errors": {
+            "active_entry_count": 0,
+            "total_error_count": 0,
+            "status_counts": {},
+            "entries": [],
+        },
+        "collection": {
+            "mode": "demonstration-read-only",
+            "collected_at": "演示数据",
+            "command_status": {
+                "smart": "demo",
+                "controller": "demo",
+                "namespace": "demo",
+                "errors": "demo",
+            },
+        },
+    }
+
+
+@app.get("/api/devices/{namespace}/details")
+def device_details(namespace: str):
+    """Return read-only SMART and identify information for one known namespace."""
+    discovered = devices()
+    device = next(
+        (item for item in discovered if item.get("namespace") == namespace),
+        None,
+    )
+    if device is None:
+        raise HTTPException(404, "NVMe Namespace 不存在或当前不可见")
+    if not _system_scan_enabled():
+        return _demo_device_detail(device)
+    return collect_device_details(device)
 
 
 @app.get("/api/summary")

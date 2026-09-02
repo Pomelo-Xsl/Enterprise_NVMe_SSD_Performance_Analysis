@@ -217,9 +217,15 @@ cache:
 
 ## 只读设备扫描
 
-Linux 检测到 `nvme-cli` 或 `lsblk` 后会自动启用真实设备扫描。扫描过程只执行
+Linux 检测到 `nvme-cli` 或 `lsblk` 后会自动启用真实设备扫描。设备列表只执行
 `nvme list -o json` 和 `lsblk --json`，用于兼容不同版本的 nvme-cli JSON 结构并补齐
-可能遗漏的 Namespace，不会运行测试或修改设备。
+可能遗漏的 Namespace。点击设备卡片后，详情页按需执行 `nvme smart-log`、
+`nvme id-ctrl`、`nvme id-ns` 和 `nvme error-log`，展示温度、磨损、备用空间、
+通电时间、读写量、介质错误、控制器和逻辑块信息。这些命令均为只读操作，不会运行
+Benchmark、PressureTest，也不会向设备写入数据或修改设备配置。
+
+设备详情命令采用独立容错：某一项因权限、固件或 nvme-cli 版本不可用时，页面仍会
+展示其他成功采集的信息，并将缺失字段明确标记为“暂无数据”。
 
 也可以显式开启：
 
