@@ -1,4 +1,9 @@
-"""YAML configuration loader with explicit, safe NVMe test validation."""
+"""Load and validate the settings shared by analysis scenarios.
+
+Configuration errors are reported before a run begins. In particular, cache
+sizes, workload mixes and alert thresholds are checked here so downstream code
+can work with typed values instead of repeatedly guarding raw YAML data.
+"""
 
 from __future__ import annotations
 from dataclasses import dataclass, field

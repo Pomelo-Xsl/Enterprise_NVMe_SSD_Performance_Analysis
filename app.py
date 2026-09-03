@@ -1,4 +1,9 @@
-"""FastAPI application for NVMe cache and performance result analysis."""
+"""HTTP entry point for the NVMe analysis console.
+
+Routes in this file expose device inventory, imported-result analysis, cache
+simulation, alerts and report downloads. Device discovery remains read-only;
+the service does not launch a benchmark or pressure workload.
+"""
 
 from __future__ import annotations
 

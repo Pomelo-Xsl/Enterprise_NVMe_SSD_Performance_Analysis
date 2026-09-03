@@ -1,4 +1,9 @@
-"""Defensive, read-only parsers for nvme-cli JSON output."""
+"""Interpret identify and SMART data returned by nvme-cli.
+
+Vendors and nvme-cli versions do not always agree on key spelling or whether a
+number is encoded as text. Parsing is deliberately tolerant, but missing health
+data remains distinguishable from a genuine zero-value counter.
+"""
 
 from __future__ import annotations
 from models import DeviceInfo

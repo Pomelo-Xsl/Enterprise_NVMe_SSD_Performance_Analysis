@@ -1,4 +1,9 @@
-"""Portable exports for task results; does not expose device-write operations."""
+"""Serialize completed analyses into files people can reuse elsewhere.
+
+CSV variants are intentionally flat for spreadsheet and plotting tools, while
+the JSON export keeps the nested report structure. Exporting never re-runs a
+workload or touches the source device.
+"""
 
 from __future__ import annotations
 

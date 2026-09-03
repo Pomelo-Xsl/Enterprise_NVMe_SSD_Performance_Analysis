@@ -1,4 +1,9 @@
-"""Deterministic workload generators for cache and performance simulations."""
+"""Synthetic traces used when no captured IO samples are supplied.
+
+Sequential, random, mixed and alternating-hot-set generators model distinct
+access shapes rather than claiming to reproduce a specific SSD. A caller-owned
+seed makes regression tests and demonstrations repeatable.
+"""
 
 from __future__ import annotations
 

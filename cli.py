@@ -1,8 +1,14 @@
-"""CLI for the Enterprise NVMe SSD Cache & Performance Analysis System."""
+"""Command-line access to the offline analysis workflow.
+
+The CLI is useful on headless hosts and in automation: it validates settings,
+analyses captured results, compares cache policies and exports reports without
+requiring the browser interface.
+"""
 
 from __future__ import annotations
 import argparse
 import json
+import logging
 from pathlib import Path
 from analysis import analyse
 from cache_simulator import compare_algorithms
@@ -16,8 +22,10 @@ from exporters import (
     task_json,
 )
 from fio_parser import parse_fio_json
+from log_setup import configure_logs, log_alerts
 from models import IOSample
-from scenario_service import ScenarioService
+from persistence import Repository
+from scenario_runner import run_configured_scenario
 from simulation import run_simulation
 
 
@@ -86,8 +94,34 @@ def simulate_cache(args):
 
 
 def run_scenario(args):
-    service = ScenarioService.from_yaml(args.config, args.database)
-    result = service.run()
+    configuration = load_application_config(args.config)
+    log_options = configuration.logging
+    logger = configure_logs(
+        directory=log_options.directory,
+        level=getattr(logging, log_options.level.upper()),
+        max_bytes=log_options.max_bytes,
+        backup_count=log_options.backup_count,
+    )
+    repository = Repository(args.database)
+    repository.initialize()
+
+    scenario = configuration.scenario
+    logger.info(
+        "scenario_started name=%s profile=%s tags=%s",
+        scenario.name,
+        scenario.profile,
+        ",".join(scenario.tags),
+    )
+    result = run_configured_scenario(configuration)
+    result["run_id"] = repository.save_run(result)
+    alert_events = result.get("alerts", {}).get("events", [])
+    log_alerts(logger, alert_events)
+    logger.info(
+        "scenario_completed run_id=%s samples=%s alerts=%s",
+        result["run_id"],
+        result.get("sample_count", 0),
+        len(alert_events),
+    )
     if args.output:
         Path(args.output).write_text(report_json(result), encoding="utf-8")
     print(

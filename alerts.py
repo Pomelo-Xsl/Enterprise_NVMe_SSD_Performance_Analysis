@@ -1,4 +1,9 @@
-"""Configurable alert rules for SSD health and benchmark behaviour."""
+"""Turn analysis measurements into operator-facing alerts.
+
+Thresholds come from the application configuration rather than being hidden in
+the rule functions. Keeping that boundary here also makes an alert reproducible
+when an imported result is reviewed later.
+"""
 
 from __future__ import annotations
 

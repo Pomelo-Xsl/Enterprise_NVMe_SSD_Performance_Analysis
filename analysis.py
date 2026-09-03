@@ -1,6 +1,8 @@
-"""Algorithms for the Enterprise NVMe SSD Cache & Performance Analysis System.
+"""Numerical helpers used by the result-analysis pipeline.
 
-All functions operate on safe, collected samples and never access a device.
+This module deliberately knows nothing about disks or HTTP requests. It works
+on already collected series, which keeps percentile and stability calculations
+usable from both the web service and offline reports.
 """
 
 from __future__ import annotations
@@ -184,6 +186,47 @@ def zscore_anomalies(series: Sequence[float], threshold: float = 2.5) -> list[di
         for index, value in enumerate(series)
         if abs((value - stats.average) / stats.stddev) >= threshold
     ]
+
+
+def detect_anomalies(
+    samples: Sequence[dict],
+    bandwidth_drop: float = 25,
+    latency_spike: float = 2.5,
+) -> list[dict]:
+    """Find bandwidth drops and latency outliers in one normalized sample run."""
+    if not samples:
+        return []
+
+    bandwidth_values = [float(sample.get("bandwidth", 0)) for sample in samples]
+    latency_values = [float(sample.get("latency", 0)) for sample in samples]
+    average_bandwidth = describe(bandwidth_values).average
+    lower_bandwidth_limit = average_bandwidth * (1 - bandwidth_drop / 100)
+    events = []
+
+    for index, bandwidth in enumerate(bandwidth_values):
+        if average_bandwidth and bandwidth < lower_bandwidth_limit:
+            events.append(
+                {
+                    "index": index,
+                    "type": "performance-jitter",
+                    "severity": "warning",
+                    "value": bandwidth,
+                    "message": "带宽明显低于整体平均值",
+                }
+            )
+
+    events.extend(
+        {
+            "index": point["index"],
+            "type": "latency-spike",
+            "severity": "warning",
+            "value": point["value"],
+            "zscore": point["zscore"],
+            "message": "检测到延迟毛刺",
+        }
+        for point in zscore_anomalies(latency_values, latency_spike)
+    )
+    return sorted(events, key=lambda event: (event["index"], event["type"]))
 
 
 def linear_trend(series: Sequence[float]) -> dict:

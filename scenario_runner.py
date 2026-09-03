@@ -1,4 +1,9 @@
-"""Configuration-driven, safe benchmark scenario execution."""
+"""Execute an in-memory analysis scenario assembled from validated settings.
+
+Despite the historical “scenario” name, this runner does not send IO to a disk.
+It generates or consumes samples, evaluates page heat and cache policies, then
+returns one report-shaped result with alerts and supporting statistics.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +11,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 
 from alerts import evaluate_performance, summary
-from anomaly import detect_anomalies
+from analysis import detect_anomalies
 from cache_metrics import compare_results
 from cache_simulator import ARCCache, LIRSCache, LRU2Cache, compare_algorithms
 from config import ApplicationConfiguration

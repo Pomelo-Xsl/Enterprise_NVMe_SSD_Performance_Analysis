@@ -1,4 +1,4 @@
-"""Domain entities shared by workload, cache, device, and report modules."""
+"""Data objects shared by collectors, algorithms and report serializers."""
 
 from __future__ import annotations
 from dataclasses import asdict, dataclass, field

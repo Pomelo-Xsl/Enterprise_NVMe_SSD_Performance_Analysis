@@ -1,4 +1,9 @@
-"""SQLite repositories for simulation runs, alerts and report metadata."""
+"""Persistence boundary for imported analyses and their derived records.
+
+SQLite keeps a deployment self-contained. Schema creation, JSON payload storage
+and alert acknowledgement are grouped here so callers do not depend on table
+layout or transaction details.
+"""
 
 from __future__ import annotations
 

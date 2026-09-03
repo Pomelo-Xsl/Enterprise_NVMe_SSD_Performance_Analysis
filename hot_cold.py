@@ -1,8 +1,9 @@
-"""Window-based hot/cold page classification for SSD cache simulations.
+"""Classify logical pages by reuse observed inside a moving time window.
 
-The classifier models a controller that periodically promotes frequently
-accessed logical pages into a hot tier and ages inactive pages back to a cold
-tier.  It is intentionally deterministic so simulations are reproducible.
+A page is promoted only after enough recent references; inactive pages age back
+to the cold set. This is a trace-analysis model, not firmware emulation, but it
+captures the promotion and demotion behaviour needed to explain cache results.
+The implementation is deterministic so two policies see identical page heat.
 """
 
 from __future__ import annotations
@@ -25,20 +26,6 @@ class PageHeat:
     score: float
     tier: str
     last_access_ms: int
-
-    def to_dict(self) -> dict:
-        return asdict(self)
-
-
-@dataclass(frozen=True)
-class HeatTransition:
-    """A page promotion or demotion event."""
-
-    timestamp_ms: int
-    page: int
-    previous_tier: str
-    current_tier: str
-    score: float
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -76,7 +63,7 @@ class HotColdClassifier:
         self._events: dict[int, deque[tuple[int, str]]] = defaultdict(deque)
         self._tiers: dict[int, str] = {}
         self._last_access: dict[int, int] = {}
-        self.transitions: list[HeatTransition] = []
+        self.transitions: list[dict] = []
 
     def _prune(self, page: int, timestamp_ms: int) -> None:
         cutoff = timestamp_ms - self.window_ms
@@ -116,13 +103,13 @@ class HotColdClassifier:
         self._tiers[page] = current
         if current != previous:
             self.transitions.append(
-                HeatTransition(
-                    timestamp_ms=sample.timestamp_ms,
-                    page=page,
-                    previous_tier=previous,
-                    current_tier=current,
-                    score=score,
-                )
+                {
+                    "timestamp_ms": sample.timestamp_ms,
+                    "page": page,
+                    "previous_tier": previous,
+                    "current_tier": current,
+                    "score": score,
+                }
             )
 
         return PageHeat(
@@ -164,10 +151,14 @@ class HotColdClassifier:
             "page_count": len(snapshots),
             "hot_pages": tier_counts.get("hot", 0),
             "cold_pages": tier_counts.get("cold", 0),
-            "promotions": sum(item.current_tier == "hot" for item in self.transitions),
-            "demotions": sum(item.current_tier == "cold" for item in self.transitions),
+            "promotions": sum(
+                item["current_tier"] == "hot" for item in self.transitions
+            ),
+            "demotions": sum(
+                item["current_tier"] == "cold" for item in self.transitions
+            ),
             "pages": [item.to_dict() for item in snapshots],
-            "transitions": [item.to_dict() for item in self.transitions],
+            "transitions": list(self.transitions),
         }
 
 

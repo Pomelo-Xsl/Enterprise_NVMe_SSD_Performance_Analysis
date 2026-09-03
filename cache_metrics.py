@@ -1,4 +1,8 @@
-"""Cache hit decomposition and algorithm-comparison statistics."""
+"""Break cache events into the numbers shown in comparisons.
+
+An overall hit ratio is not enough for diagnosis, so hot/cold hits and
+clean/dirty evictions are retained when policies are ranked.
+"""
 
 from __future__ import annotations
 

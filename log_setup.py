@@ -1,4 +1,4 @@
-"""Structured, rotating application and alert logs."""
+"""Create the rotating application and alert logs used by server deployments."""
 
 from __future__ import annotations
 import logging

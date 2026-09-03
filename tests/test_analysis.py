@@ -3,6 +3,7 @@ import unittest
 from analysis import (
     analyse,
     describe,
+    detect_anomalies,
     detect_knee,
     ewma,
     latency_qos,
@@ -76,6 +77,21 @@ class BehaviourTests(unittest.TestCase):
     def test_trend_and_anomalies(self):
         self.assertEqual(linear_trend([10, 20, 30])["direction"], "rising")
         self.assertEqual(len(zscore_anomalies([10, 10, 10])), 0)
+
+    def test_operator_anomalies_keep_explainable_event_types(self):
+        events = detect_anomalies(
+            [
+                {"bandwidth": 100, "latency": 10},
+                {"bandwidth": 100, "latency": 10},
+                {"bandwidth": 20, "latency": 100},
+            ],
+            bandwidth_drop=25,
+            latency_spike=1,
+        )
+        self.assertEqual(
+            {event["type"] for event in events},
+            {"performance-jitter", "latency-spike"},
+        )
 
     def test_full_analysis_contract(self):
         result = analyse(samples())

@@ -1,9 +1,13 @@
-"""End-to-end safe cache and IO performance simulation orchestration."""
+"""Convenience API for running a complete offline simulation.
+
+It selects a workload generator, materializes one trace and passes that same
+trace through statistical analysis, anomaly rules, hot/cold classification and
+all cache policies. Sharing the trace is essential to a fair comparison.
+"""
 
 from __future__ import annotations
 
-from analysis import analyse
-from anomaly import detect_anomalies
+from analysis import analyse, detect_anomalies
 from cache_metrics import compare_results
 from cache_simulator import compare_algorithms
 from hot_cold import classify_workload

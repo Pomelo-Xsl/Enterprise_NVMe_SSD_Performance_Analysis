@@ -1,31 +1,21 @@
-"""Deterministic SSD-cache replacement simulators: LRU-2, ARC and LIRS-inspired."""
+"""In-memory cache-policy models used for side-by-side analysis.
+
+LRU-2 and ARC follow their usual recency/frequency ideas. The LIRS class is a
+practical approximation suited to recorded IO traces rather than a controller
+implementation. Every policy consumes the same materialized workload so the
+comparison is repeatable.
+"""
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 from collections import OrderedDict, defaultdict, deque
-from dataclasses import asdict, dataclass
-from typing import Deque, Iterable, Optional
+from typing import Deque, Iterable
 
 from models import CacheState, IOSample
 
 
-@dataclass
-class AccessResult:
-    """Outcome of one cache lookup, including write-back side effects."""
-
-    page: int
-    hit: bool
-    hot: bool
-    evicted: Optional[int] = None
-    dirty_eviction: bool = False
-
-    def to_dict(self) -> dict:
-        return asdict(self)
-
-
-class BaseCache(ABC):
-    """Common accounting shared by every replacement policy."""
+class _CachePolicy:
+    """Shared counters and event recording; policy state stays in subclasses."""
 
     def __init__(self, capacity_pages: int, hot_window_ms: int = 1000):
         if capacity_pages < 1:
@@ -44,8 +34,8 @@ class BaseCache(ABC):
         self,
         sample: IOSample,
         hit: bool,
-        evicted: Optional[int] = None,
-    ) -> AccessResult:
+        evicted: int | None = None,
+    ) -> dict:
         """Update hit, heat and dirty-page counters after one lookup."""
         hot = self.is_hot(sample.lba, sample.timestamp_ms)
         access_history = self.history[sample.lba]
@@ -71,26 +61,30 @@ class BaseCache(ABC):
 
         self.state.resident_pages = self.resident_count()
         self.state.dirty_pages = len(self.dirty_pages)
-        return AccessResult(sample.lba, hit, hot, evicted, dirty_eviction)
+        return {
+            "page": sample.lba,
+            "hit": hit,
+            "hot": hot,
+            "evicted": evicted,
+            "dirty_eviction": dirty_eviction,
+        }
 
-    @abstractmethod
     def resident_count(self) -> int:
-        """Return the number of pages currently backed by cache capacity."""
+        raise NotImplementedError
 
-    @abstractmethod
-    def access(self, sample: IOSample) -> AccessResult:
-        """Process one access according to the concrete replacement policy."""
+    def access(self, sample: IOSample) -> dict:
+        raise NotImplementedError
 
     def run(self, samples: Iterable[IOSample]) -> dict:
         events = [self.access(sample) for sample in samples]
         return {
             "algorithm": type(self).__name__,
             "state": self.state.to_dict(),
-            "events": [event.to_dict() for event in events],
+            "events": events,
         }
 
 
-class LRU2Cache(BaseCache):
+class LRU2Cache(_CachePolicy):
     """LRU-K with K=2; eviction favours pages with fewer than two references."""
 
     def __init__(self, capacity_pages: int, **kwargs):
@@ -101,7 +95,7 @@ class LRU2Cache(BaseCache):
     def resident_count(self) -> int:
         return len(self.pages)
 
-    def access(self, sample: IOSample) -> AccessResult:
+    def access(self, sample: IOSample) -> dict:
         page = sample.lba
         hit = page in self.pages
         evicted = None
@@ -129,7 +123,7 @@ class LRU2Cache(BaseCache):
         return self.record(sample, hit, evicted)
 
 
-class ARCCache(BaseCache):
+class ARCCache(_CachePolicy):
     """Adaptive Replacement Cache with recency/frequency resident and ghost lists."""
 
     def __init__(self, capacity_pages: int, **kwargs):
@@ -155,7 +149,7 @@ class ARCCache(BaseCache):
         self.b2[victim] = None
         return victim
 
-    def access(self, sample: IOSample) -> AccessResult:
+    def access(self, sample: IOSample) -> dict:
         page = sample.lba
         evicted = None
         if page in self.t1 or page in self.t2:
@@ -187,7 +181,7 @@ class ARCCache(BaseCache):
         return self.record(sample, False, evicted)
 
 
-class LIRSCache(BaseCache):
+class LIRSCache(_CachePolicy):
     """Practical LIRS approximation: low inter-reference reuse stays resident."""
 
     def __init__(self, capacity_pages: int, **kwargs):
@@ -200,7 +194,7 @@ class LIRSCache(BaseCache):
     def resident_count(self) -> int:
         return len(self.lir) + len(self.hir)
 
-    def access(self, sample: IOSample) -> AccessResult:
+    def access(self, sample: IOSample) -> dict:
         page = sample.lba
         hit = page in self.lir or page in self.hir
         evicted = None

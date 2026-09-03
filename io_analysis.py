@@ -1,34 +1,19 @@
-"""IO-centric statistics for SSD benchmark samples.
+"""Compute the IO breakdown used on analysis and report pages.
 
-The functions accept either :class:`models.IOSample` objects or normalized
-dictionary samples produced by the FIO parser.
+Inputs may be :class:`models.IOSample` instances or normalized dictionaries
+from the FIO adapter. Results include tail-latency percentiles, read/write mix,
+block-size distribution and time-bucketed bandwidth rather than a single
+average that could hide short stalls.
 """
 
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from dataclasses import asdict, dataclass
 from statistics import mean
 from typing import Iterable
 
 from analysis import describe, percentile
 from models import IOSample
-
-
-@dataclass(frozen=True)
-class DirectionStats:
-    operation: str
-    operations: int
-    bytes: int
-    ratio: float
-    average_latency_us: float
-    p50_latency_us: float
-    p95_latency_us: float
-    p99_latency_us: float
-    p999_latency_us: float
-
-    def to_dict(self) -> dict:
-        return asdict(self)
 
 
 def _value(sample: IOSample | dict, name: str, default=0):
@@ -83,18 +68,17 @@ def direction_breakdown(samples: Iterable[IOSample | dict]) -> dict:
         byte_count = sum(
             int(_value(sample, "size_bytes", 0)) for sample in operation_samples
         )
-        stats = DirectionStats(
-            operation=operation,
-            operations=len(operation_samples),
-            bytes=byte_count,
-            ratio=(len(operation_samples) / total if total else 0.0),
-            average_latency_us=(mean(latencies) if latencies else 0.0),
-            p50_latency_us=percentile(latencies, 50),
-            p95_latency_us=percentile(latencies, 95),
-            p99_latency_us=percentile(latencies, 99),
-            p999_latency_us=percentile(latencies, 99.9),
-        )
-        result[operation] = stats.to_dict()
+        result[operation] = {
+            "operation": operation,
+            "operations": len(operation_samples),
+            "bytes": byte_count,
+            "ratio": len(operation_samples) / total if total else 0.0,
+            "average_latency_us": mean(latencies) if latencies else 0.0,
+            "p50_latency_us": percentile(latencies, 50),
+            "p95_latency_us": percentile(latencies, 95),
+            "p99_latency_us": percentile(latencies, 99),
+            "p999_latency_us": percentile(latencies, 99.9),
+        }
     return result
 
 

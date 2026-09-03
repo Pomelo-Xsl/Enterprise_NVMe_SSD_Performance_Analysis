@@ -1,8 +1,10 @@
-"""Read-only NVMe device discovery for Linux analysis hosts.
+"""Inventory NVMe namespaces without issuing write commands.
 
-The scanner prefers ``nvme list -o json`` and supplements it with ``lsblk``.
-The second source is important for nvme-cli releases that omit a namespace
-from their JSON output even though the kernel exposes the block device.
+``nvme list -o json`` is the primary source. Its output differs between
+nvme-cli releases, and some releases omit a namespace that Linux still exposes,
+so the scanner reconciles it with ``lsblk`` and the sysfs device tree. The merge
+rules live in this module because an incomplete inventory is more misleading
+than an explicitly marked, partially populated device record.
 """
 
 from __future__ import annotations

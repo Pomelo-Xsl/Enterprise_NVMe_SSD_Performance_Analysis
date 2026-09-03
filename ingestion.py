@@ -1,4 +1,9 @@
-"""Adapters for results produced by SSD Benchmark, PressureTest and FIO."""
+"""Normalize external test results before the rest of the system sees them.
+
+Benchmark, PressureTest and FIO exports use different envelopes and units. This
+adapter identifies the shape, extracts samples and attaches the same analysis,
+alert and cache-comparison sections regardless of the original producer.
+"""
 
 from __future__ import annotations
 
@@ -6,8 +11,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 
 from alerts import evaluate_result, summary
-from analysis import analyse
-from anomaly import detect_anomalies
+from analysis import analyse, detect_anomalies
 from cache_metrics import compare_results
 from cache_simulator import compare_algorithms
 from fio_parser import parse_fio_json

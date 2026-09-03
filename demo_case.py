@@ -1,4 +1,9 @@
-"""Deterministic business demo for the NVMe analysis workflow."""
+"""Build the database-style sample shown by the “演示案例” action.
+
+The data is synthetic but intentionally stable across runs, allowing a presenter
+to explain hot/cold transitions and cache-policy differences without depending
+on a particular server or attached SSD.
+"""
 
 from __future__ import annotations
 

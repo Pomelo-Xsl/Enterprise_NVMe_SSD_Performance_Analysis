@@ -1,26 +1,15 @@
-"""Parsers for FIO JSON/JSON+ output and bw/iops/latency log files."""
+"""Translate FIO artifacts into the application's normalized IO model.
+
+FIO has changed field names and latency units across versions. The parser keeps
+those compatibility details in one place and also understands the optional
+bandwidth, IOPS and latency log formats produced beside a JSON result.
+"""
 
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
-
-
-@dataclass(frozen=True)
-class FioDirectionResult:
-    operation: str
-    io_bytes: int
-    total_ios: int
-    bandwidth_kib_s: float
-    iops: float
-    runtime_ms: int
-    latency_mean_us: float
-    latency_percentiles_us: dict[str, float]
-
-    def to_dict(self) -> dict:
-        return asdict(self)
 
 
 def _number(data: dict, key: str, default=0):
@@ -42,18 +31,23 @@ def _latency_section(direction: dict) -> tuple[float, dict[str, float]]:
     return 0.0, {}
 
 
-def parse_direction(operation: str, data: dict) -> FioDirectionResult:
+def parse_direction(operation: str, data: dict) -> dict:
+    """Return the normalized fields used by reports for one IO direction."""
     mean_latency, percentiles = _latency_section(data)
-    return FioDirectionResult(
-        operation=operation,
-        io_bytes=int(_number(data, "io_bytes", _number(data, "io_kbytes") * 1024)),
-        total_ios=int(_number(data, "total_ios", 0)),
-        bandwidth_kib_s=float(_number(data, "bw", _number(data, "bw_bytes") / 1024)),
-        iops=float(_number(data, "iops", 0)),
-        runtime_ms=int(_number(data, "runtime", 0)),
-        latency_mean_us=mean_latency,
-        latency_percentiles_us=percentiles,
-    )
+    return {
+        "operation": operation,
+        "io_bytes": int(
+            _number(data, "io_bytes", _number(data, "io_kbytes") * 1024)
+        ),
+        "total_ios": int(_number(data, "total_ios", 0)),
+        "bandwidth_kib_s": float(
+            _number(data, "bw", _number(data, "bw_bytes") / 1024)
+        ),
+        "iops": float(_number(data, "iops", 0)),
+        "runtime_ms": int(_number(data, "runtime", 0)),
+        "latency_mean_us": mean_latency,
+        "latency_percentiles_us": percentiles,
+    }
 
 
 def parse_fio_json(data: dict) -> dict:
@@ -71,9 +65,9 @@ def parse_fio_json(data: dict) -> dict:
                 "group_id": job.get("groupid", 0),
                 "error": job.get("error", 0),
                 "elapsed_seconds": job.get("elapsed", 0),
-                "read": parse_direction("read", job.get("read", {})).to_dict(),
-                "write": parse_direction("write", job.get("write", {})).to_dict(),
-                "trim": parse_direction("trim", job.get("trim", {})).to_dict(),
+                "read": parse_direction("read", job.get("read", {})),
+                "write": parse_direction("write", job.get("write", {})),
+                "trim": parse_direction("trim", job.get("trim", {})),
                 "job_options": job.get("job options", {}),
             }
         )
